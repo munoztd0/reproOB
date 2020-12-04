@@ -1,0 +1,2 @@
+"0",""
+"0","tab_model(splinemod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="""", show.re.var = F, digits = 3, dv.labels = ""Number of grips"") #, pred.labels=c(""CS+"", ""Lean"", ""Interaction (Lean:CS+)"")"

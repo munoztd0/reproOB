@@ -1,0 +1,6 @@
+"0","options(contrasts=c(""contr.sum"",""contr.poly"")) #set contrasts to sum !"
+"0","set.seed(666) #set random seed"
+"0","control = lmerControl(optimizer ='optimx', optCtrl=list(method='nlminb')) #set ""better"" lmer optimizer #nolimit # yoloptimizer"
+"0","emm_options(pbkrtest.limit = 5000) #increase repetitions limit"
+"0","options(mc.cores = parallel::detectCores()); cl <- parallel::detectCores() #to mulithread"
+"0","source('R/pes_ci.R', echo=F); source('R/LMER_misc_tools.R', echo=F); source('R/plots.R', echo=F); source('R/utils.R', echo=F)"

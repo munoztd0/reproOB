@@ -1,0 +1,26 @@
+{
+    "collab_server" : "",
+    "contents" : "",
+    "created" : 1607098461258.000,
+    "dirty" : true,
+    "encoding" : "UTF-8",
+    "folds" : "",
+    "hash" : "0",
+    "id" : "92886632",
+    "lastKnownWriteTime" : 1607098537,
+    "last_content_update" : 1607100482576,
+    "path" : "~/Desktop/SwitchDrive/OBIWAN/REPRO/tmpOBIOWAN\\.R",
+    "project_path" : "tmpOBIOWAN\\.R",
+    "properties" : {
+        "cursorPosition" : "531,0",
+        "scrollLine" : "522",
+        "tempName" : "Untitled1"
+    },
+    "read_only" : false,
+    "read_only_alternatives" : [
+    ],
+    "relative_order" : 2,
+    "source_on_save" : false,
+    "source_window" : "",
+    "type" : "r_source"
+}

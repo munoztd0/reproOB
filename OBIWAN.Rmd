@@ -1,0 +1,542 @@
+---
+title: OBIWAN BEHAVIORAL ANALYSIS
+author: David Munoz Tord
+date: 2020-12-03
+repro:
+  packages:
+    - aaronpeikert/repro@adb5fa569
+    - apaTables
+    - MBESS
+    - afex
+    - car
+    - ggplot2
+    - dplyr
+    - plyr
+    - tidyr
+    - reshape
+    - Hmisc
+    - Rmisc
+    - ggpubr
+    - ez
+    - gridExtra
+    - plotrix
+    - parallel
+    - emmeans
+    - BayesFactor
+    - effectsize
+    - devtools
+    - misty
+    - bayestestR
+    - lspline
+    - kableExtra
+    - sjPlot
+    - knitr
+  scripts:
+    - R/clean.R
+  data:
+    info:   data/info.csv
+    intern: data/internal.csv
+    PAV:    data/PAV.csv
+    INST:   data/INST.csv
+    PIT:    data/PIT.csv
+    HED:    data/HEDONIC.csv
+output: html_document
+---
+
+```{r setup, echo=FALSE, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+
+library(repro)
+# load packages from yaml header
+automate_load_packages()
+# include external scripts
+automate_load_scripts()
+# load data
+info <- automate_load_data(info, read.csv, stringsAsFactors = T)
+intern <- automate_load_data(intern, read.csv, stringsAsFactors = T)
+PAV <- automate_load_data(PAV, read.csv, stringsAsFactors = T)
+INST <- automate_load_data(INST, read.csv, stringsAsFactors = T)
+PIT <- automate_load_data(PIT, read.csv, stringsAsFactors = T)
+HED <- automate_load_data(HED, read.csv, stringsAsFactors = T)
+```
+
+## Setup
+
+May I suggest running `repro::automate()`? This will create a `Dockerfile` & `Makefile` based on every RMarkdown in this folder and the special yamls in them.
+
+If you are unsure weather or not you have `git` `make` & `docker`.
+
+```{r, eval=TRUE}
+check_git()
+check_make()
+check_docker()
+```
+
+
+```{r clean, echo=FALSE, include=FALSE}
+# see R/clean.R
+# this chunk (as long as it is empty) runs external
+# code from scripts listed in the YAML
+```
+
+```{r options, echo=FALSE, include=FALSE}
+options(contrasts=c("contr.sum","contr.poly")) #set contrasts to sum !
+set.seed(666) #set random seed
+control = lmerControl(optimizer ='optimx', optCtrl=list(method='nlminb')) #set "better" lmer optimizer #nolimit # yoloptimizer
+emm_options(pbkrtest.limit = 5000) #increase repetitions limit
+options(mc.cores = parallel::detectCores()); cl <- parallel::detectCores() #to mulithread
+source('R/pes_ci.R', echo=F); source('R/LMER_misc_tools.R', echo=F); source('R/plots.R', echo=F); source('R/utils.R', echo=F)
+```
+### Demographics
+\
+Summary statistics AGE 
+```{r}
+df = PAV; df$group = as.factor(revalue(as.factor(df$group), c("control"="Lean", "obese"="Obese")));
+AGE = ddply(df,~group,summarise,mean=mean(age),sd=sd(age), min = min(age), max = max(age));
+AGE %>%
+  kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+\
+Summary statistics BMI 
+```{r}
+BMI = ddply(df,~group,summarise,mean=mean(BMI_t1),sd=sd(BMI_t1), min = min(BMI_t1), max = max(BMI_t1)); 
+BMI %>%
+  kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+\
+Summary statistics GENDER 
+```{r}
+GENDER = ddply(df, .(id, group), summarise, gender=mean(as.numeric(gender)))  %>%
+  group_by(gender, group) %>%
+  tally(); GENDER$gender = as.factor(revalue(as.factor(GENDER$gender), c("0"="Men", "1"="Women"))); 
+GENDER %>%
+  kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+\
+N by groups 
+```{r}
+N_group = ddply(df, .(id, group), summarise, group=mean(as.numeric(group)))  %>%
+  group_by(group) %>% tally(); N_group$group = as.factor(revalue(as.factor(N_group$group), c("1"="Lean", "2"="Obese"))); 
+N_group %>%
+  kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+
+## Pavlvovian Conditioning Task
+```{r PAV_prepro, echo=FALSE, include=FALSE, cache=FALSE}
+# -------------------------------------- PREPROC ----------------------------------------
+
+# define as.factors
+fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
+PAV[fac] <- lapply(PAV[fac], factor)
+
+#revalue all catego
+PAV$group = as.factor(revalue(PAV$group, c(control="-1", obese="1"))) #change value of group
+PAV$condition = as.factor(revalue(PAV$condition, c(CSminus="-1", CSplus="1"))); PAV$condition <- factor(PAV$condition, levels = c("1", "-1"))#change value of condition
+
+#center covariates
+numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
+PAV = PAV %>% group_by %>% mutate_at(numer, scale)
+
+# get times in milliseconds 
+PAV$RT               <- PAV$RT * 1000
+
+#Preprocessing
+PAV$condition <- droplevels(PAV$condition, exclude = "Baseline")
+acc_bef = mean(PAV$ACC, na.rm = TRUE) #0.93
+full = length(PAV$RT)
+
+##shorter than 100ms and longer than 3sd+mean
+PAV.clean <- filter(PAV, RT >= 100) # min RT is 
+PAV.clean <- ddply(PAV.clean, .(id), transform, RTm = mean(RT))
+PAV.clean <- ddply(PAV.clean, .(id), transform, RTsd = sd(RT))
+PAV.clean <- filter(PAV.clean, RT <= RTm+3*RTsd) 
+
+# calculate the dropped data in the preprocessing
+clean = length(PAV.clean$RT)
+dropped = full-clean
+(dropped*100)/full
+
+densityPlot(PAV.clean$RT) #RT are skewed 
+
+#log transform function
+t_log_scale <- function(x){
+  if(x==0){y <- 1}
+  else {y <- (sign(x)) * (log(abs(x)))}
+  y }
+
+PAV.clean$RT_T <- sapply(PAV.clean$RT,FUN=t_log_scale)
+densityPlot(PAV.clean$RT_T) # much better 
+```
+### Analysis: Reaction Times
+Model Selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PAV_T0.R\
+Formula = RT_T ~ condition*group + (condition|id) + (1|trialxcondition)\
+```{r PAV_RT, echo=FALSE, include=FALSE, cache=TRUE}
+# -------------------------------------- RT
+formula = 'RT_T ~ condition*group + (condition|id) + (1|trialxcondition)'
+### Linear Mixed Models 
+# Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##model = mixed(formula, data = PAV.clean, method = "LRT", control = control, REML = FALSE); 
+model = mixed(formula, data = PAV.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 50, cl=cl)); 
+
+mod <- lmer(formula, data = PAV.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
+ref_grid(model)  #triple check everything is centered at 0
+```
+```{r}
+tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Reaction Times (log)") #pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+```
+\
+Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500)\
+```{r}
+#Log-liklihood Ratio Test methos to evaluate significance of fixed effects in mixed-effects models (using MLE fit)
+#tab = nice(model)
+#colnames(tab) <- c('','DF','Chi2','p')
+#tab$`` = c('Condition','Group','Group:Condition')
+nice(model) %>% kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+\
+Extract BF from mixed models see Wagenmakers, 2007\
+```{r, cache=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
+main = lmer(formula, data = PAV.clean, control = control, REML = F)
+null = lmer(RT_T ~ group + (condition|id) + (1|trialxcondition), data = PAV.clean, control = control, REML = F)
+test = anova(main, null, test = 'Chisq')
+BF_RT = exp((test[1,2] - test[2,2])/2); 
+```
+BF = `r BF_RT` \
+\
+```{r, echo=FALSE, include=FALSE, cache=TRUE}
+#Estimated contrast mean and 95% CI\ (one sided test  side = "<")
+#p_cond = emmeans(mod, pairwise~ condition, side = "<"); p_cond #for condition (CS+ < CS- left sided!)
+#CI_cond = confint(emmeans(mod, pairwise~ condition),level = 0.95, method = c("boot"), nsim = 5000); 
+#tab =as_tibble(CI_cond$contrasts); tab$contrast = "CS+ > CS-"
+```
+\
+```{r}
+#tab %>% kbl() %>%
+  #kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+### Reaction Times by condition
+```{r PAV_RT_plot, echo=FALSE, warning=FALSE, cache=TRUE}
+PAV.means <- aggregate(PAV.clean$RT, by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$liking, PAV.clean$group), FUN='mean') # extract means
+colnames(PAV.means) <- c('id','condition','liking','group', 'RT')
+
+# RT
+dfR <- summarySEwithin(PAV.means,
+                       measurevar = "RT",
+                       withinvars = "condition", 
+                       idvar = "id")
+
+dfR$cond <- ifelse(dfR$condition == "1", -0.25, 0.25)
+PAV.means$cond <- ifelse(PAV.means$condition == "1", -0.25, 0.25)
+PAV.means <- PAV.means %>% mutate(condjit = jitter(as.numeric(cond), 0.3),
+                                  grouping = interaction(id, cond))
+
+pp <- ggplot(PAV.means, aes(x = cond, y = RT, 
+                            fill = condition, color = condition)) +
+  geom_line(aes(x = condjit, group = id, y = RT), alpha = .3, size = 0.5, color = 'gray') +
+  geom_flat_violin(scale = "count", trim = FALSE, alpha = .2, aes(fill = condition, color = NA))+
+  geom_point(aes(x = condjit, shape = group), alpha = .3,) +
+  geom_crossbar(data = dfR, aes(y = RT, ymin=RT-se, ymax=RT+se), width = 0.2 , alpha = 0.1)+
+  ylab('Reaction Times (ms)')+
+  xlab('Conditioned stimulus')+
+  scale_y_continuous(expand = c(0, 0), breaks = c(seq.int(200,800, by = 200)), limits = c(180,875)) +
+  scale_x_continuous(labels=c("CS+", "CS-"),breaks = c(-.25,.25), limits = c(-.5,.5)) +
+  scale_fill_manual(values=c("1"= pal[2], "-1"=  pal[1]), guide = 'none') +
+  scale_color_manual(values=c("1"= pal[2], "-1"=  pal[1]), guide = 'none') +
+  scale_shape_manual(name="Group", labels=c("Lean", "Obese"), values = c(1, 2)) +
+  theme_bw()
+
+
+ppp <- pp + averaged_theme 
+ppp
+
+```
+```{r, include=FALSE}
+cairo_pdf('figures/Figure_PavlovianRT.pdf')
+print(ppp)
+dev.off()
+
+```
+### Analysis: Pleasantness Ratings
+Using ANOVA here because no hierarchical structure\
+Formula = liking ~ condition*group + Error (id/condition)\
+```{r PAV_Lik, cache=TRUE}
+# -------------------------------------- Liking
+anova.liking <- aov_car(formula = liking ~ condition*group + Error (id/condition), data = PAV.means, anova_table = list(correction = "GG", es = "pes")); nice(anova.liking)%>%
+  kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+``` 
+
+```{r, cache=TRUE, include=FALSE}
+#Partial Eta-Squared with 90% CI \
+pes_lik = pes_ci(liking ~ condition*group + Error (id/condition), PAV.means); 
+#pes_lik %>%
+  #kbl() %>%
+  #kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+\
+Bayes factor\
+```{r, cache=TRUE}
+liking.BF <- anovaBF(liking ~ condition*group + id, data = PAV.means, 
+                     whichRandom = "id", iterations = 50000); 
+  kbl(as_tibble(liking.BF)[,1:2]) %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+
+### Pleasantness Ratings by condition
+```{r PAV_LIK_plot, echo=FALSE, warning=FALSE, cache=TRUE}
+dfL <- summarySEwithin(PAV.means,
+                       measurevar = "liking",
+                       withinvars = "condition", 
+                       idvar = "id")
+
+dfL$cond <- ifelse(dfL$condition == "1", -0.25, 0.25)
+
+# Liking
+pp <- ggplot(PAV.means, aes(x = cond, y = liking, 
+                            fill = condition, color = condition)) +
+  geom_line(aes(x = condjit, group = id, y = liking), alpha = .3, size = 0.5, color = 'gray' ) +
+  geom_flat_violin(scale = "count", trim = FALSE, alpha = .2, aes(fill = condition, color = NA)) +
+  geom_point(aes(x = condjit, shape = group), alpha = .3) +
+  geom_crossbar(data = dfL, aes(y = liking, ymin=liking-se, ymax=liking+se), width = 0.2 , alpha = 0.1)+
+  ylab('Liking Ratings')+
+  xlab('Conditioned stimulus')+
+  scale_y_continuous(expand = c(0, 0), breaks = c(seq.int(0,100, by = 25)), limits = c(-0.05,100.5)) +
+  scale_x_continuous(labels=c("CS+", "CS-"),breaks = c(-.25,.25), limits = c(-.5,.5)) +
+  scale_fill_manual(values=c("1"= pal[2], "-1"=  pal[1]), guide = 'none') +
+  scale_color_manual(values=c("1"= pal[2], "-1"=  pal[1]), guide = 'none') +
+  scale_shape_manual(name="Group", labels=c("Lean", "Obese"), values = c(1, 2)) +
+  theme_bw()
+
+
+ppp <- pp + averaged_theme 
+ppp
+```
+```{r, include=FALSE}
+cairo_pdf('figures/Figure_PavlovianLiking.pdf')
+print(ppp)
+dev.off()
+```
+
+## Instrumental Conditioning Task
+```{r INST_prepro, echo=FALSE, warning=FALSE, cache=FALSE}
+#defne factors
+fac <- c("id", "trial", "gender", "group")
+INST[fac] <- lapply(INST[fac], factor)
+#revalue all catego
+INST$group = as.factor(revalue(INST$group, c(control="-1", obese="1"))) #change value of group
+#center covariates
+numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
+INST = INST %>% group_by %>% mutate_at(numer, scale)
+INST$trial        <- as.numeric(INST$trial)
+```
+\
+### Analysis: Number of Grips
+Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_INST.R\
+Formula = grips ~ trial*group + thirsty + hungry + piss + (1 | id)\
+Model Comparison between linear, quadratic, cubic and spline(5) \
+```{r INST, echo=FALSE, include=FALSE, cache=TRUE}
+# -------------------------------------- STATS -----------------------------------------------------
+# stat -  different fit
+formu = '*group + thirsty +hungry + piss + (1 |id)'
+## LINEAR FIT  
+linmod <- lmer(paste('grips~trial', formu),data=INST, control = control, REML = FALSE)
+## POLYNOMIAL FIT  
+quadmod <- lmer(paste('grips~trial+I(trial^2)', formu), data=INST, control = control, REML = FALSE)
+cubmod <- lmer(paste('grips~trial+I(trial^2)+I(trial^3)', formu),data=INST, control = control, REML = FALSE)
+## PIECEWISE REGRESSION WITH SPLINES
+splinemod <- lmer(paste('grips ~ lspline(trial, 5)', formu),  data = INST, control = control, REML = FALSE)
+```
+\
+Piecewise Regression with Splines has the best fit
+```{r cache=TRUE}
+BF_fit = bayesfactor_models(linmod, quadmod, cubmod, splinemod, denominator = linmod) 
+  kbl(as_tibble(BF_fit)) %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+
+tab_model(splinemod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Number of grips") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+```
+\
+```{r, echo=FALSE, include=FALSE, cache=TRUE}
+tmp = lspline(INST$trial, 5); INST$ls1 = tmp[,1] ; INST$ls2 = tmp[,2]
+anova(splinemod)
+
+model = mixed(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + thirsty + hungry + piss + (1 |id), data = INST, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 50, cl=cl)) 
+```
+\
+```{r}
+nice(model) %>% kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+
+### Number of Grips over time
+```{r INST_LIK_plot, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE}
+# get the averaged dataset
+INST.means <- aggregate(INST$grips, by = list(INST$id, INST$trial, INST$group), FUN='mean') # extract means
+colnames(INST.means) <- c('id','trial','group', 'grips')
+
+#over time
+dfTRIAL <- summarySEwithin(INST.means,
+                           measurevar = "grips",
+                           withinvars = "trial",
+                           idvar = "id")
+
+dfTRIAL$trial       <- as.numeric(dfTRIAL$trial)
+
+dfTRIALg <- summarySEwithin(INST.means,
+                           measurevar = "grips",
+                           withinvars = "trial",
+                           betweenvars = "group",
+                           idvar = "id")
+
+dfTRIALg$trial       <- as.numeric(dfTRIALg$trial)
+
+dfTRIAL$x = dfTRIAL$trial; dfTRIAL$y = dfTRIAL$grips
+splinelm <- lm(y ~ lspline(x, 5), data=dfTRIAL)
+
+
+pp <- ggplot(dfTRIAL, aes(x =trial, y = grips)) +
+  geom_point(data = dfTRIALg, aes(shape = group), alpha = 0.3, color = 'black') +
+  geom_point(data = dfTRIAL, alpha = 0.5, color = pal[4], shape = 18) +
+  geom_line(color = pal[4]) +
+  #geom_smooth(method="lm", formula=formula(splinelm), color="tomato",fill = NA, size=0.7) + addd this for lsplines
+  geom_ribbon(aes(ymin=grips-se, ymax=grips+se), fill = pal[4], alpha = 0.3)+
+  ylab('Number of Grips')+
+  xlab('Trial') +
+  scale_y_continuous(expand = c(0, 0),  limits = c(10.5,15.05),  breaks=c(seq.int(11,15, by = 1))) +
+  scale_x_continuous(expand = c(0, 0),  limits = c(0,15.1),  breaks=c(seq.int(1,15, by = 1))) +
+  scale_shape_manual(name="Group", labels=c("Lean", "Obese"), values = c(1, 2, 18)) +
+  theme_bw()
+
+ppp <- pp + averaged_theme + theme(legend.position=c(.9,.88), axis.text.x = element_text(size = 16))
+ppp
+```
+```{r echo=FALSE, include = FALSE, warning=FALSE}
+cairo_pdf('figures/Figure_Instrumental_trial.pdf')
+print(ppp)
+dev.off()
+```
+
+## Pavlvovian-Instrumental Transfer (PIT) Task
+```{r PIT_prepro, echo=FALSE, include=FALSE, cache=FALSE}
+# define as factors
+fac <- c("id", "trial", "condition", "trialxcondition", "gender", "group")
+PIT[fac] <- lapply(PIT[fac], factor)
+#remove the baseline (we just use it for fMRI analysis)
+PIT.clean =  subset(PIT, condition != 'BL') 
+#revalue all catego
+PIT.clean$group = as.factor(revalue(PIT.clean$group, c(control="-1", obese="1"))) #change value of group
+PIT.clean$condition = as.factor(revalue(PIT.clean$condition, c(CSminus="-1", CSplus="1"))); PIT.clean$condition <- factor(PIT.clean$condition, levels = c("1", "-1"))#change value of condition
+#center covariates
+numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
+PIT.clean = PIT.clean %>% group_by %>% mutate_at(numer, scale)  
+```
+### Analysis: Mobilized effort (AUC)
+Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PIT.R\
+Formula = AUC ~ condition*group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition)\
+
+```{r PIT, echo=FALSE, include=FALSE, cache=TRUE}
+# -------------------------------------- STATS -----------------------------------------------
+formula = 'AUC ~ condition*group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition)'
+
+### Linear Mixed Models 
+# Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##model = mixed(formula, data = PIT.clean, method = "LRT", control = control, REML = FALSE); model
+model = mixed(formula, data = PIT.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 50, cl=cl)) 
+
+ref_grid(model)  #triple check everything is centered at 0
+
+mod <- lmer(formula, data = PIT.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
+```
+
+```{r, cache=TRUE}
+tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Mobilized effort (AUC)") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+```
+Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500)\
+```{r, cache=TRUE}
+nice(model) %>% kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+Extract BF from mixed models see Wagenmakers, 2007\
+```{r, echo=FALSE, include=FALSE, cache=TRUE}
+main = lmer(formula, data = PIT.clean, control = control, REML = F)
+null = lmer(AUC ~ condition+ group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
+test = anova(main, null, test = 'Chisq')
+
+#get BF from mixed models see Wagenmakers, 2007
+BF_PIT = exp((test[1,2] - test[2,2])/2); BF_PIT
+```
+BF = `r BF_PIT` \
+
+Post-Hoc test (pairwise~ condition|group, adjust = "tukey", side = ">")\
+```{r, echo=FALSE, include=FALSE, cache=TRUE}
+#p_cond = emmeans(mod, pairwise~ condition, side = ">"); p_cond #for condition (CS+ > CS- right sided)
+#CI_cond = confint(emmeans(mod, pairwise~ condition),level = 0.95, method = c("boot"), nsim = 5000); #CI_cond$contrasts #get CI condition
+
+inter = emmeans(mod, pairwise~ condition|group, adjust = "tukey", side = ">"); inter$contrasts  #for group X condition (adjusted but still right sided)
+CI_inter = confint(emmeans(mod, pairwise~ condition|group),level = 0.95,method = c("boot"),nsim = 5000); CI_inter$contrasts ##get CI inter
+tmp = as_tibble(inter$contrasts); 
+tab =as_tibble(CI_inter$contrasts); tab$contrast = "CS+ > CS-"; tab$group = c("Lean", "Obese"); tab = select(tab, -c('df')); tab$df = c(26,61); tab$t = tmp$t.ratio; tab$p = tmp$p.value; t
+```
+\
+```{r}
+tab %>% kbl() %>%
+  kable_styling(latex_options = "striped", position = "left", full_width = F) 
+```
+
+### Mobilized effort (AUC) difference (CS+ > CS-) by group
+```{r PIT_plot, echo=FALSE, warning=FALSE, cache=TRUE}
+
+# create bin for each mini block
+#PIT.clean$trialxcondition    <- as.numeric(PIT.clean$trialxcondition)
+#PIT.clean  <- ddply(PIT.clean, "id", transform, bin = as.numeric(cut2(trialxcondition, g = 5)))
+
+PIT.s <- subset (PIT.clean, condition == '1'| condition == '-1')
+PIT.s$trialxcondition <- factor(PIT.s$trialxcondition)
+PIT.means <- aggregate(PIT.s$AUC, by = list(PIT.s$id, PIT.s$condition, PIT.s$group), FUN='mean') # extract means
+colnames(PIT.means) <- c('id','condition', 'group', 'force')
+
+#PIT.trial <- aggregate(PIT.s$AUC, by = list(PIT.s$id, PIT.s$trialxcondition), FUN='mean') # extract means
+#colnames(PIT.trial) <- c('id','trialxcondition','force')
+
+### Plot between contrasts
+
+df_est = emmeans(mod, pairwise~ condition|group) # estimate contrasts means by group from the model 
+dfP = data.frame(df_est$contrasts); dfP$force = dfP$estimate #create a dataframe
+CSp = subset(PIT.means, condition == '1'); CSm = subset(PIT.means, condition == '-1'); cont.means = CSp
+cont.means$force = CSp$force - CSm$force; 
+
+dfP$groupi <- ifelse(dfP$group == "1", -0.25, 0.25)
+cont.means$groupi <- ifelse(cont.means$group == "1", -0.25, 0.25)
+set.seed(666)
+cont.means <- cont.means %>% mutate(groupjit = jitter(as.numeric(groupi), 0.25),
+                                    grouping = interaction(id, groupi))
+
+
+pp <- ggplot(cont.means, aes(x = groupi, y = force, 
+                             fill = group, color = group)) +
+  geom_hline(yintercept=0, linetype="dashed", size=0.4, alpha=0.8) +
+  geom_flat_violin(scale = "count", trim = FALSE, alpha = .2, aes(fill = group, color = NA))+
+  geom_point(aes(x = groupjit), alpha = .3,) +
+  geom_crossbar(data = dfP, aes(y = force, ymin=force-SE, ymax=force+SE), width = 0.2 , alpha = 0.1)+
+  #geom_errorbar(data = dfP,aes(group = group, ymin=force-SE, ymax=force+SE),position=position_nudge(x=0.15), size=0.5, width=0.1,  color = "black") + 
+  ylab('\u0394 Mobilized effort (CS+ > CS-)')+
+  xlab('')+
+  scale_fill_manual(values=c("1" = pal[6],"-1"=pal[1]), guide = 'none') +
+  scale_color_manual(values=c("1" = pal[6],"-1"=pal[1]), guide = 'none')  +
+  scale_y_continuous(expand = c(0, 0), breaks = c(seq.int(-200,200, by = 50)), limits = c(-200.5,200.5)) +
+  scale_x_continuous(labels=c("Obese", "Lean"),breaks = c(-.25,.25), limits = c(-.5,.5)) +
+  theme_bw() 
+
+ppp <- pp + averaged_theme 
+ppp
+
+```
+```{r echo=FALSE, include = FALSE, warning=FALSE}
+cairo_pdf('figures/Figure_PIT_con.pdf')
+print(ppp)
+dev.off()
+```
+

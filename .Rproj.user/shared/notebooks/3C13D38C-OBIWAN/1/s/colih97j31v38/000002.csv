@@ -1,0 +1,6 @@
+"0","#Log-liklihood Ratio Test methos to evaluate significance of fixed effects in mixed-effects models (using MLE fit)"
+"0","#tab = nice(model)"
+"0","#colnames(tab) <- c('','DF','Chi2','p')"
+"0","#tab$`` = c('Condition','Group','Group:Condition')"
+"0","nice(model) %>% kbl() %>%"
+"0","  kable_styling(latex_options = ""striped"", position = ""left"", full_width = F) "

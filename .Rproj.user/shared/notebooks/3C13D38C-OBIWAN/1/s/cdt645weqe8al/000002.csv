@@ -1,0 +1,2 @@
+"0","#tab %>% kbl() %>%"
+"0","  #kable_styling(latex_options = ""striped"", position = ""left"", full_width = F) "

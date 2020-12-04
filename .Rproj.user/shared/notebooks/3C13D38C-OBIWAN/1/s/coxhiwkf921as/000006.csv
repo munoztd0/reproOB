@@ -1,0 +1,4 @@
+"0","BMI = ddply(df,~group,summarise,mean=mean(BMI_t1),sd=sd(BMI_t1), min = min(BMI_t1), max = max(BMI_t1)); "
+"0","BMI %>%"
+"0","  kbl() %>%"
+"0","  kable_styling(latex_options = ""striped"", position = ""left"", full_width = F) "
