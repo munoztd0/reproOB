@@ -1,4 +1,4 @@
-PROJECT := repro
+PROJECT := t0
 WORKDIR := $(CURDIR)
 
 # list below your targets and their recipies

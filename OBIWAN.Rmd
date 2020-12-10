@@ -16,7 +16,7 @@ repro:
     intern: data/internal.csv
   packages:
   - aaronpeikert/repro@adb5fa569
-  - crsh/papaja
+  - crsh/papaja@release
   - tinylabels
   - apaTables
   - MBESS
@@ -48,10 +48,26 @@ repro:
   - rlist
   - janitor
   scripts: R/clean.R
-
+  apt:
+    - octave
+    - gnuplot
+    - libgsl0-dev
 ---
 
 ```{r setup, echo=FALSE, include=FALSE}
+
+# ERROR: dependency ‘gsl’ is not available for package ‘MBESS’
+# * removing ‘/usr/local/lib/R/site-library/MBESS’
+# 
+# The downloaded source packages are in
+# 	‘/tmp/downloaded_packages’
+# Error: installation of package ‘MBESS’ had non-zero exit status
+# In addition: Warning messages:
+# 1: In install.packages(pkgs, ...) :
+#   installation of package ‘gsl’ had non-zero exit status
+# 2: In install.packages(pkgs, ...) :
+#   installation of package ‘MBESS’ had non-zero exit status
+
 knitr::opts_chunk$set(echo = FALSE)
 
 library(repro)

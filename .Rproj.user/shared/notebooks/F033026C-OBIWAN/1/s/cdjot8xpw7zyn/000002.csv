@@ -1,6 +1,0 @@
-"0","N_group = ddply(df, .(id, group), summarise, group=mean(as.numeric(group)))  %>%"
-"0","  group_by(group) %>% tally(); N_group$group = as.factor(revalue(as.factor(N_group$group), c(""1""=""Lean"", ""2""=""Obese""))); "
-"0","N_group %>%"
-"0","  kbl(caption =""Group"") %>%"
-"0","  kable_styling(latex_options = ""HOLD_position"", position = ""center"", full_width = F) %>%"
-"0","  row_spec(0,bold=T)"
