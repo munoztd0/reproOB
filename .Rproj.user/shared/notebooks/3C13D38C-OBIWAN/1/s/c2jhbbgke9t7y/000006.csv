@@ -1,5 +1,0 @@
-"0","df = PAV; df$group = as.factor(revalue(as.factor(df$group), c(""control""=""Lean"", ""obese""=""Obese"")));"
-"0","AGE = ddply(df,~group,summarise,mean=mean(age),sd=sd(age), min = min(age), max = max(age));"
-"0","AGE %>%"
-"0","  kbl() %>%"
-"0","  kable_styling(latex_options = ""striped"", position = ""left"", full_width = F) "

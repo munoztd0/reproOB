@@ -17,6 +17,22 @@ averaged_theme <- theme_bw(base_size = 32, base_family = "Helvetica")+
         axis.line = element_line(size = 0.5),
         panel.border = element_blank())
 
+html_theme <- theme_bw(base_size = 24, base_family = "Helvetica")+
+  theme(strip.text.x = element_text(size = 24, face = "bold"),
+        strip.background = element_rect(color="white", fill="white", linetype="solid"),
+        legend.position=c(.9,.9),
+        legend.title  = element_text(size = 12),
+        legend.text  = element_text(size = 10),
+        legend.key.size = unit(0.2, "cm"),
+        legend.key = element_rect(fill = "transparent", colour = "transparent"),
+        panel.grid.major.x = element_blank() ,
+        panel.grid.major.y = element_line(size=.2, color="lightgrey") ,
+        panel.grid.minor = element_blank(),
+        axis.title.x = element_text(size = 18),
+        axis.title.y = element_text(size =18),
+        axis.line = element_line(size = 0.5),
+        panel.border = element_blank())
+
 
 pal = viridis::inferno(n=5) # specialy conceived for colorblindness
 pal[6] = "#21908CFF" # add one

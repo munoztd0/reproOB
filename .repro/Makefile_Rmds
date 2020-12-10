@@ -1,3 +1,0 @@
-OBIWAN.html: OBIWAN.Rmd data/info.csv data/internal.csv data/PAV.csv data/INST.csv data/PIT.csv data/HEDONIC.csv R/clean.R
-	$(RUN1) Rscript -e 'rmarkdown::render("$(WORKDIR)/$<", "all")' $(RUN2)
-

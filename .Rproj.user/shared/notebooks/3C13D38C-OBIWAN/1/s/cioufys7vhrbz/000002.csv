@@ -1,4 +1,0 @@
-"0","# -------------------------------------- Liking"
-"0","anova.liking <- aov_car(formula = liking ~ condition*group + Error (id/condition), data = PAV.means, anova_table = list(correction = ""GG"", es = ""pes"")); nice(anova.liking)%>%"
-"0","  kbl() %>%"
-"0","  kable_styling(latex_options = ""striped"", position = ""left"", full_width = F) "

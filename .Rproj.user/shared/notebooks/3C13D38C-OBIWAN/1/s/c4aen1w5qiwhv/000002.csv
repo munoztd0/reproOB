@@ -1,4 +1,0 @@
-"0","main = lmer(formula, data = PAV.clean, control = control, REML = F)"
-"0","null = lmer(RT_T ~ group + (condition|id) + (1|trialxcondition), data = PAV.clean, control = control, REML = F)"
-"0","test = anova(main, null, test = 'Chisq')"
-"0","BF_RT = exp((test[1,2] - test[2,2])/2); "

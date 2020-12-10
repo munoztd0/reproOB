@@ -13,7 +13,7 @@ if(!require(pacman)) {
 
 pacman::p_load(apaTables, MBESS, afex, car, ggplot2, dplyr, plyr, tidyr, 
                reshape, Hmisc, Rmisc,  ggpubr, ez, gridExtra, plotrix, parallel,
-               lsmeans, BayesFactor, effectsize, devtools, misty, bayestestR, lspline)
+               lsmeans, BayesFactor, effectsize, devtools, misty, bayestestR, lspline, optimX)
 
 
 # get tool
@@ -611,7 +611,7 @@ HED = HED %>% group_by %>% mutate_at(numer, scale)
 #FOR MODEL SELECTION we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> CODE/ANALYSIS/BEHAV/MODEL_SELECTION/MS_HED_T0.R
 
 formula = 'perceived_liking ~ condition*group + thirsty + hungry + hungry:condition  + 
-          + fam + int + int:condition + (condition |id) + (1|trialxcondition)'
+          fam + int + int:condition + (condition |id) + (1|trialxcondition)'
 model = mixed(formula, data = HED, method = "LRT", control = control, REML = FALSE); model
 
 ### Linear Mixed Models  
