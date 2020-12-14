@@ -30,5 +30,4 @@ RUN install2.r --error --skipinstalled \
   tinylabels \ 
   XML
 RUN installGithub.r \ 
-  aaronpeikert/repro@adb5fa569 \ 
-  crsh/papaja@release
+  aaronpeikert/repro@adb5fa569

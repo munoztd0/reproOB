@@ -18,34 +18,37 @@ list2env(dflist, envir=.GlobalEnv)
 listA = 2:5
 def = function(data, number){
   baseINTERN = subset(intern, phase == number)
-  data = merge(x = get(data), y = baseINTERN[ , c("piss", "thirsty", 'hungry', 'id')], by = "id", all.x=TRUE)
-  diffINTERN = subset(intern, phase == number | phase == number+1) #before and after 
-  before = subset(diffINTERN, phase == number); after = subset(diffINTERN, phase == number+1); diff = after
-  diff$diff_piss = diff$piss - before$piss
-  diff$diff_thirsty = diff$thirsty - before$thirsty
-  diff$diff_hungry = diff$hungry - before$hungry
-  data= merge(data, y = diff[ , c("diff_piss", "diff_thirsty", 'diff_hungry', 'id')], by = "id", all.x=TRUE)
+  data = merge(x = get(data), y = baseINTERN[ , c("thirsty", 'hungry', 'id')], by = "id", all.x=TRUE)
+  # diffINTERN = subset(intern, phase == number | phase == number+1) #before and after 
+  # before = subset(diffINTERN, phase == number); after = subset(diffINTERN, phase == number+1); diff = after
+  # diff$diff_piss = diff$piss - before$piss
+  # diff$diff_thirsty = diff$thirsty - before$thirsty
+  # diff$diff_hungry = diff$hungry - before$hungry
+  # data= merge(data, y = diff[ , c("diff_piss", "diff_thirsty", 'diff_hungry', 'id')], by = "id", all.x=TRUE)
   return(data)
 }
 dflist = mapply(def,tables,listA)
 list2env(dflist, envir=.GlobalEnv)
 
 
-# PAV PREPROC -------------------------------------------------------------
-
-# -------------------------------------- PREPROC ----------------------------------------
-
-# define as.factors
-fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
-PAV[fac] <- lapply(PAV[fac], factor)
-
-#revalue all catego
-#PAV$group = as.factor(revalue(PAV$group, c(control="-1", obese="1"))) #change value of group
-PAV$condition = as.factor(revalue(PAV$condition, c(CSminus="CS-", CSplus="CS+"))); #PAV$condition <- factor(PAV$condition, levels = c("1", "-1"))#change value of condition
-
 #center covariates
-numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
-PAV = PAV %>% group_by %>% mutate_at(numer, scale)
+numer <- c("thirsty", "hungry", "age")
+tables <- c("PAV","INST","PIT","HED")
+dflist <- lapply(mget(tables),function(x) x %>% group_by %>% mutate_at(numer, scale))
+list2env(dflist, envir=.GlobalEnv)
+
+
+#imput mean (0 since its mean centered) for the two participant that have missing covariate (MAR) data so we can still use them in ANCOVA
+imput = function(x) {x[is.na(x)] <- 0 
+  return(x)}
+tables <- c("PAV","INST","PIT","HED")
+dflist <- lapply(mget(tables),function(x) imput(x))
+list2env(dflist, envir=.GlobalEnv)
+
+
+
+# prepro RT PAv -----------------------------------------------------------
+
 
 # get times in milliseconds 
 PAV$RT               <- PAV$RT * 1000
@@ -66,16 +69,20 @@ clean = length(PAV.clean$RT)
 dropped = full-clean
 (dropped*100)/full
 
-densityPlot(PAV.clean$RT) #RT are skewed 
-
-#log transform function
-t_log_scale <- function(x){
-  if(x==0){y <- 1}
-  else {y <- (sign(x)) * (log(abs(x)))}
-  y }
-
-PAV.clean$RT_T <- sapply(PAV.clean$RT,FUN=t_log_scale)
-densityPlot(PAV.clean$RT_T) # much better 
+# densityPlot(PAV.clean$RT) #RT are skewed 
+# 
+# #log transform function
+# t_log_scale <- function(x){
+#   if(x==0){y <- 1}
+#   else {y <- (sign(x)) * (log(abs(x)))}
+#   y }
+# 
+# PAV.clean$RT_T <- sapply(PAV.clean$RT,FUN=t_log_scale)
+# densityPlot(PAV.clean$RT_T) # much better 
 
 PAV = PAV.clean
+
+
+
+
 

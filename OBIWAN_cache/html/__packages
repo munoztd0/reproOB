@@ -35,3 +35,7 @@ kableExtra
 sjPlot
 tinylabels
 knitr
+XML
+rlist
+janitor
+optimx

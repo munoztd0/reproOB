@@ -39,6 +39,8 @@ RUN install2.r --error --skipinstalled \
   sjPlot \ 
   tidyr \ 
   tinylabels \ 
-  XML
+  XML \
+  optimx
 RUN installGithub.r \ 
-  aaronpeikert/repro@adb5fa569 
+  aaronpeikert/repro@adb5fa569 \
+  crsh/papaja@devel

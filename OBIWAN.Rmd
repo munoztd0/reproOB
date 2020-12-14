@@ -16,7 +16,7 @@ repro:
     intern: data/internal.csv
   packages:
   - aaronpeikert/repro@adb5fa569
-  - crsh/papaja@release
+  - crsh/papaja@devel
   - tinylabels
   - apaTables
   - MBESS
@@ -47,6 +47,7 @@ repro:
   - XML
   - rlist
   - janitor
+  - optimx
   scripts: R/clean.R
   apt:
     - octave
@@ -56,17 +57,6 @@ repro:
 
 ```{r setup, echo=FALSE, include=FALSE}
 
-# ERROR: dependency ‘gsl’ is not available for package ‘MBESS’
-# * removing ‘/usr/local/lib/R/site-library/MBESS’
-# 
-# The downloaded source packages are in
-# 	‘/tmp/downloaded_packages’
-# Error: installation of package ‘MBESS’ had non-zero exit status
-# In addition: Warning messages:
-# 1: In install.packages(pkgs, ...) :
-#   installation of package ‘gsl’ had non-zero exit status
-# 2: In install.packages(pkgs, ...) :
-#   installation of package ‘MBESS’ had non-zero exit status
 
 knitr::opts_chunk$set(echo = FALSE)
 
@@ -87,7 +77,7 @@ HED <- automate_load_data(HED, read.csv, stringsAsFactors = T)
 ## Setup
 
 May I suggest running `repro::automate()`? This will create a `Dockerfile` & `Makefile` based on every RMarkdown in this folder and the special yamls in them.
-
+add ENV DEBIAN_FRONTEND=noninteractive
 If you are unsure weather or not you have `git` `make` & `docker`.
 
 ```{r, eval=TRUE}
@@ -104,6 +94,7 @@ check_docker()
 ```
 
 ```{r options, echo=FALSE, include=FALSE}
+options(warn=-1) # remove warnings
 options(contrasts=c("contr.sum","contr.poly")) #set contrasts to sum !
 set.seed(666) #set random seed
 control = lmerControl(optimizer ='optimx', optCtrl=list(method='nlminb')) #set "better" lmer optimizer #nolimit # yoloptimizer
@@ -151,48 +142,20 @@ N_group %>%
 # Pavlvovian Conditioning Task
 ```{r PAV_prepro, echo=FALSE, include=FALSE, cache=FALSE}
 # -------------------------------------- PREPROC ----------------------------------------
-
 # define as.factors
 fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
-PAV[fac] <- lapply(PAV[fac], factor)
+PAV.clean[fac] <- lapply(PAV.clean[fac], factor)
 
 #revalue all catego
-PAV$group = as.factor(revalue(PAV$group, c(control="-1", obese="1"))) #change value of group
-PAV$condition = as.factor(revalue(PAV$condition, c(CSminus="-1", CSplus="1"))); PAV$condition <- factor(PAV$condition, levels = c("1", "-1"))#change value of condition
+PAV.clean$group = as.factor(revalue(PAV.clean$group, c(control="-1", obese="1"))) #change value of group
+PAV.clean$condition = as.factor(revalue(PAV.clean$condition, c(CSminus="-1", CSplus="1"))); PAV.clean$condition <- factor(PAV.clean$condition, levels = c("1", "-1"))#change value of condition
 
-#center covariates
-numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
-PAV = PAV %>% group_by %>% mutate_at(numer, scale)
+#create liking covariate
+bs = ddply(PAV.clean, .(id, condition), summarise, lik = mean(liking, na.rm = TRUE)) 
+CSm = subset(bs, condition == "-1"); CSp = subset(bs, condition == "1"); diff = CSp;
+diff$lik = CSp$lik - CSm$lik; diff$lik  = scale(diff$lik)
+PAV.clean = merge(x = PAV.clean, y = diff[ , c("lik", 'id')], by = "id", all.x=TRUE)
 
-# get times in milliseconds 
-PAV$RT               <- PAV$RT * 1000
-
-#Preprocessing
-PAV$condition <- droplevels(PAV$condition, exclude = "Baseline")
-acc_bef = mean(PAV$ACC, na.rm = TRUE) #0.93
-full = length(PAV$RT)
-
-##shorter than 100ms and longer than 3sd+mean
-PAV.clean <- filter(PAV, RT >= 100) # min RT is 
-PAV.clean <- ddply(PAV.clean, .(id), transform, RTm = mean(RT))
-PAV.clean <- ddply(PAV.clean, .(id), transform, RTsd = sd(RT))
-PAV.clean <- filter(PAV.clean, RT <= RTm+3*RTsd) 
-
-# calculate the dropped data in the preprocessing
-clean = length(PAV.clean$RT)
-dropped = full-clean
-(dropped*100)/full
-
-densityPlot(PAV.clean$RT) #RT are skewed 
-
-#log transform function
-t_log_scale <- function(x){
-  if(x==0){y <- 1}
-  else {y <- (sign(x)) * (log(abs(x)))}
-  y }
-
-PAV.clean$RT_T <- sapply(PAV.clean$RT,FUN=t_log_scale)
-densityPlot(PAV.clean$RT_T) # much better 
 ```
 ## Analysis: Reaction Times
 Model Selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PAV_T0.R\
@@ -200,13 +163,13 @@ Formula = RT_T ~ condition*group + (condition|id) + (1|trialxcondition)\
 //The parametric bootstrap involves sampling from the estimated model whose parameters are replaced by its unbiased estimators taken from the sample. For unequal cell frequencies
 ```{r PAV_RT, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- RT
-formula = 'RT_T ~ condition*group + (condition|id) + (1|trialxcondition)'
+formula = 'RT ~ condition*group + age + gender + thirsty + hungry + (condition|id) + (1|trialxcondition)'
 ### Linear Mixed Models 
 # Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
 model = mixed(formula, data = PAV.clean, method = "LRT", control = control, REML = FALSE); 
 #model = mixed(formula, data = PAV.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10, cl=cl)); 
 
-mod <- lmer(formula, data = PAV.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
+mod <- lmer(formula, data = PAV.clean, control = control, REML = T) # recompute model with REML = T now for further report
 ref_grid(model)  #triple check everything is centered at 0
 tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Reaction Times (log)", emph.p = TRUE, file = "tmp/temp1.html")#pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
 ```
@@ -215,34 +178,20 @@ tables <- list.clean(readHTMLTable("tmp/temp1.html"), fun = is.null, recursive =
 tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
 tables2[is.na(tables2)] <- ""
-tables2[1:3,1:3] %>% kbl(caption ="Reaction Times (log)" ) %>%
+tables2[1:7,1:3] %>% kbl(caption ="Reaction Times (log)" ) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
-tmp =tables2[4:8,1:2]
+tmp =tables2[8:12,1:2]
 names(tmp) <- NULL
 tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) 
 ```
 \
 ```{r, cache=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
-main = lmer(formula, data = PAV.clean, control = control, REML = F)
-null = lmer(RT_T ~ group + (condition|id) + (1|trialxcondition), data = PAV.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_cond = exp((test[1,2] - test[2,2])/2); 
-
-main = lmer(formula, data = PAV.clean, control = control, REML = F)
-null = lmer(RT_T ~ condition + (condition|id) + (1|trialxcondition), data = PAV.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_group = exp((test[1,2] - test[2,2])/2); 
-
-main = lmer(formula, data = PAV.clean, control = control, REML = F)
-null = lmer(RT_T ~ condition + group + (condition|id) + (1|trialxcondition), data = PAV.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_inter = exp((test[1,2] - test[2,2])/2); 
+#calculate BF01 for each variable
+test = extractBF(generalTestBF(RT ~ condition*group + age + gender + thirsty + hungry + id, data= PAV.clean, whichRandom = 'id', neverExclude =  'id')); BF = 1/test[1] #switch to BF10
 
 table = nice(model)
-table$BF = BF_cond
-table$BF[2] = BF_group
-table$BF[3] = BF_inter
+table$BF = rev(BF$bf)
 ```
 ```{r}
 table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)", digits = 2) %>%
@@ -264,7 +213,6 @@ table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significan
 ```{r PAV_RT_plot, echo=FALSE, warning=FALSE, cache=TRUE}
 PAV.means <- aggregate(PAV.clean$RT, by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$liking, PAV.clean$group), FUN='mean') # extract means
 colnames(PAV.means) <- c('id','condition','liking','group', 'RT')
-
 # RT
 dfR <- summarySEwithin(PAV.means,
                        measurevar = "RT",
@@ -306,7 +254,7 @@ Using ANOVA here because no hierarchical structure\
 Formula = liking ~ condition*group + Error (id/condition)\
 ```{r PAV_Lik, cache=TRUE}
 # -------------------------------------- Liking
-anova.liking <- aov_car(formula = liking ~ condition*group + Error (id/condition), data = PAV.means, anova_table = list(correction = "GG", es = "pes")); 
+anova.liking <- aov_car(formula = liking ~ condition*group + Error (id/condition), data = PAV.clean, anova_table = list(correction = "GG", es = "pes"), fun_aggregate = mean); 
 ``` 
 
 ```{r, cache=TRUE, include=FALSE}
@@ -319,7 +267,7 @@ pes_lik = pes_ci(liking ~ condition*group + Error (id/condition), PAV.means);
 \
 Bayes factor\
 ```{r, cache=TRUE}
-liking.BF <- anovaBF(liking ~ condition*group + id, data = PAV.means, 
+liking.BF <- anovaBF(liking ~ condition*group + id, data = PAV.clean, 
                      whichRandom = "id", iterations = 5000); 
 BF = as_tibble(liking.BF)[,1:2]
 
@@ -367,18 +315,15 @@ dev.off()
 # Instrumental Conditioning Task
 ```{r INST_prepro, echo=FALSE, warning=FALSE, cache=FALSE}
 #defne factors
-fac <- c("id", "trial", "gender", "group")
+fac <- c("id", "gender", "group")
 INST[fac] <- lapply(INST[fac], factor)
 #revalue all catego
 INST$group = as.factor(revalue(INST$group, c(control="-1", obese="1"))) #change value of group
-#center covariates
-numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
-INST = INST %>% group_by %>% mutate_at(numer, scale)
-INST$trial        <- as.numeric(INST$trial)
+
 ```
 ## Analysis: Number of Grips
 Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_INST.R\
-Formula = grips ~ trial*group + thirsty + hungry + piss + (1 | id)\
+Formula = grips ~ trial*group + thirsty + hungry  + (1 | id)\
 Model Comparison between linear, quadratic, cubic and spline(5) \
 ```{r INST, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- STATS -----------------------------------------------------
@@ -521,8 +466,6 @@ PIT.clean =  subset(PIT, condition != 'BL')
 PIT.clean$group = as.factor(revalue(PIT.clean$group, c(control="-1", obese="1"))) #change value of group
 PIT.clean$condition = as.factor(revalue(PIT.clean$condition, c(CSminus="-1", CSplus="1"))); PIT.clean$condition <- factor(PIT.clean$condition, levels = c("1", "-1"))#change value of condition
 #center covariates
-numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age")
-PIT.clean = PIT.clean %>% group_by %>% mutate_at(numer, scale)  
 ```
 ## Analysis: Mobilized effort (AUC)
 Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PIT.R\
@@ -534,7 +477,7 @@ formula = 'AUC ~ condition*group + hungry + hungry:condition  + (condition|id) +
 
 ### Linear Mixed Models 
 # Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
-model = mixed(formula, data = PIT.clean, method = "LRT", control = control, REML = FALSE); model
+model = mixed(formula, data = PIT.clean, method = "LRT", control = control, REML = FALSE)
 #model = mixed(formula, data = PIT.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10000, cl=cl)) 
 
 ref_grid(model)  #triple check everything is centered at 0
@@ -542,6 +485,11 @@ ref_grid(model)  #triple check everything is centered at 0
 mod <- lmer(formula, data = PIT.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
 
 tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Mobilized effort (AUC)", file = "tmp/temp3.html") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+
+PIT.means <- aggregate(PIT.clean$AUC, by = list(PIT.clean$id, PIT.clean$condition, PIT.clean$group), FUN='mean') # extract means
+colnames(PIT.means) <- c('id','condition', 'group', 'n_grips')
+test = aov_car(AUC ~ condition*group  + hungry + thirsty  + gender + age +
+  Error(id/condition), PIT.clean, factorize = F, fun_aggregate = mean)
 ```
 \
 ```{r, echo=FALSE}
@@ -727,7 +675,7 @@ diff$int = Milkshake$int - Empty$int; diff$fam = Milkshake$fam - Empty$fam;
 HED = merge(x = HED, y = diff[ , c("int", "fam", 'id')], by = "id", all.x=TRUE)
 
 #center covariates
-numer <- c("piss", "thirsty", "hungry", "diff_piss", "diff_thirsty", "diff_hungry", "age", "fam", "int")
+numer <- c("fam", "int")
 HED = HED %>% group_by %>% mutate_at(numer, scale)
 HED$intensity = HED$int; HED$familiarity = HED$fam
 ```
