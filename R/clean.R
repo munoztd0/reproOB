@@ -39,8 +39,6 @@ list2env(dflist, envir=.GlobalEnv)
 
 
 #imput mean (0 since its mean centered) for the two participant that have missing covariate (MAR) data so we can still use them in ANCOVA
-imput = function(x) {x[is.na(x)] <- 0 
-  return(x)}
 tables <- c("PAV","INST","PIT","HED")
 dflist <- lapply(mget(tables),function(x) imput(x))
 list2env(dflist, envir=.GlobalEnv)
@@ -69,20 +67,18 @@ clean = length(PAV.clean$RT)
 dropped = full-clean
 (dropped*100)/full
 
-# densityPlot(PAV.clean$RT) #RT are skewed 
-# 
-# #log transform function
-# t_log_scale <- function(x){
-#   if(x==0){y <- 1}
-#   else {y <- (sign(x)) * (log(abs(x)))}
-#   y }
-# 
-# PAV.clean$RT_T <- sapply(PAV.clean$RT,FUN=t_log_scale)
-# densityPlot(PAV.clean$RT_T) # much better 
-
 PAV = PAV.clean
 
+# define as.factors
+fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
+PAV.clean[fac] <- lapply(PAV.clean[fac], factor)
+
+#revalue all catego
+PAV.clean$group = as.factor(revalue(PAV.clean$group, c(control="-1", obese="1"))) #change value of group
+PAV.clean$condition = as.factor(revalue(PAV.clean$condition, c(CSminus="-1", CSplus="1"))); PAV.clean$condition <- factor(PAV.clean$condition, levels = c("1", "-1"))#change value of condition
 
 
+PAV.means <- aggregate(PAV.clean$RT, by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$liking, PAV.clean$group, PAV.clean$age, PAV.clean$gender, PAV.clean$group), FUN='mean') # extract means
+colnames(PAV.means) <- c('id','condition','liking','group', 'RT')
 
 

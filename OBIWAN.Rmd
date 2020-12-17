@@ -23,8 +23,8 @@ repro:
   - afex
   - car
   - ggplot2
-  - dplyr
   - plyr
+  - dplyr
   - tidyr
   - reshape
   - Hmisc
@@ -57,8 +57,7 @@ repro:
 
 ```{r setup, echo=FALSE, include=FALSE}
 
-
-knitr::opts_chunk$set(echo = FALSE)
+knitr::opts_chunk$set(echo = FALSE, warnings=FALSE)
 
 library(repro)
 # load packages from yaml header
@@ -80,57 +79,50 @@ May I suggest running `repro::automate()`? This will create a `Dockerfile` & `Ma
 add ENV DEBIAN_FRONTEND=noninteractive
 If you are unsure weather or not you have `git` `make` & `docker`.
 
-```{r, eval=TRUE}
+```{r check, eval=TRUE}
 check_git()
 check_make()
 check_docker()
 ```
 
-
-```{r clean, echo=FALSE, include=FALSE}
-# see R/clean.R
-# this chunk (as long as it is empty) runs external
-# code from scripts listed in the YAML
-```
-
 ```{r options, echo=FALSE, include=FALSE}
-options(warn=-1) # remove warnings
-options(contrasts=c("contr.sum","contr.poly")) #set contrasts to sum !
+options(scipen = 666, warn=-1, contrasts=c("contr.sum","contr.poly"), mc.cores = parallel::detectCores()) #remove scientific notation # remove warnings #set contrasts to sum !
 set.seed(666) #set random seed
 control = lmerControl(optimizer ='optimx', optCtrl=list(method='nlminb')) #set "better" lmer optimizer #nolimit # yoloptimizer
 emm_options(pbkrtest.limit = 5000) #increase repetitions limit
-options(mc.cores = parallel::detectCores()); cl <- parallel::detectCores() #to mulithread
-source('R/pes_ci.R', echo=F); source('R/LMER_misc_tools.R', echo=F); source('R/plots.R', echo=F); source('R/utils.R', echo=F)
+cl <- parallel::detectCores() #to mulithread
+source('R/plots.R', echo=F)# plot specification
+source('R/utils.R', echo=F)# useful functions
 ```
+
+```{r clean, echo=FALSE, include=FALSE}
+# this chunk runs R/clean.R (listed in the YAML)
+```
+
+
 ## Demographics
 ### Summary statistics:
-```{r}
+```{r demographgics}
 df = PAV; df$group = as.factor(revalue(as.factor(df$group), c("control"="Lean", "obese"="Obese")));
 AGE = ddply(df,~group,summarise,mean=mean(age),sd=sd(age), min = min(age), max = max(age));
 AGE %>%
   kbl(caption ="AGE", digits = 2) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
   row_spec(0,bold=T)
-```
-\
-```{r}
+
 BMI = ddply(df,~group,summarise,mean=mean(BMI_t1),sd=sd(BMI_t1), min = min(BMI_t1), max = max(BMI_t1)); 
 BMI %>%
   kbl(caption ="BMI", digits = 2) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
   row_spec(0,bold=T)
-```
-\
-```{r}
+
 GENDER = ddply(df, .(id, group), summarise, gender=mean(as.numeric(gender)))  %>%
   group_by(gender, group) %>%
   tally(); GENDER$gender = as.factor(revalue(as.factor(GENDER$gender), c("0"="Men", "1"="Women"))); 
   GENDER %>% kbl(caption ="GENDER") %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
   row_spec(0,bold=T)
-```
-\
-```{r}
+
 N_group = ddply(df, .(id, group), summarise, group=mean(as.numeric(group)))  %>%
   group_by(group) %>% tally(); N_group$group = as.factor(revalue(as.factor(N_group$group), c("1"="Lean", "2"="Obese"))); 
 N_group %>%
@@ -140,26 +132,9 @@ N_group %>%
 ```
 
 # Pavlvovian Conditioning Task
-```{r PAV_prepro, echo=FALSE, include=FALSE, cache=FALSE}
-# -------------------------------------- PREPROC ----------------------------------------
-# define as.factors
-fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
-PAV.clean[fac] <- lapply(PAV.clean[fac], factor)
-
-#revalue all catego
-PAV.clean$group = as.factor(revalue(PAV.clean$group, c(control="-1", obese="1"))) #change value of group
-PAV.clean$condition = as.factor(revalue(PAV.clean$condition, c(CSminus="-1", CSplus="1"))); PAV.clean$condition <- factor(PAV.clean$condition, levels = c("1", "-1"))#change value of condition
-
-#create liking covariate
-bs = ddply(PAV.clean, .(id, condition), summarise, lik = mean(liking, na.rm = TRUE)) 
-CSm = subset(bs, condition == "-1"); CSp = subset(bs, condition == "1"); diff = CSp;
-diff$lik = CSp$lik - CSm$lik; diff$lik  = scale(diff$lik)
-PAV.clean = merge(x = PAV.clean, y = diff[ , c("lik", 'id')], by = "id", all.x=TRUE)
-
-```
 ## Analysis: Reaction Times
 Model Selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PAV_T0.R\
-Formula = RT_T ~ condition*group + (condition|id) + (1|trialxcondition)\
+Formula = RT_T ~ condition*group + age + gender + thirsty + hungry + (condition|id) + (1|trialxcondition)\
 //The parametric bootstrap involves sampling from the estimated model whose parameters are replaced by its unbiased estimators taken from the sample. For unequal cell frequencies
 ```{r PAV_RT, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- RT
@@ -173,7 +148,8 @@ mod <- lmer(formula, data = PAV.clean, control = control, REML = T) # recompute 
 ref_grid(model)  #triple check everything is centered at 0
 tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Reaction Times (log)", emph.p = TRUE, file = "tmp/temp1.html")#pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
 ```
-```{r}
+\
+```{r PAV_RT_mod}
 tables <- list.clean(readHTMLTable("tmp/temp1.html"), fun = is.null, recursive = FALSE)
 tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
@@ -186,33 +162,28 @@ tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) 
 ```
 \
-```{r, cache=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
-#calculate BF01 for each variable
-test = extractBF(generalTestBF(RT ~ condition*group + age + gender + thirsty + hungry + id, data= PAV.clean, whichRandom = 'id', neverExclude =  'id')); BF = 1/test[1] #switch to BF10
-
+```{r PAV_RT_BF, cache=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
+#calculate exclusion BF01 for each variable
+test = extractBF(generalTestBF(RT ~ condition*group + age + gender + thirsty + hungry + id, data= PAV.clean, whichRandom = 'id', neverExclude =  'id')); BF = 1/test[1] #switch to BF10 inclusion
 table = nice(model)
 table$BF = rev(BF$bf)
 ```
-```{r}
+```{r PAV_RT_res}
 table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)", digits = 2) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
 ```
 \
-```{r, echo=FALSE, include=FALSE, cache=TRUE}
+```{r PAV_RT_cont, echo=FALSE, include=FALSE, cache=TRUE}
 #Estimated contrast mean and 95% CI\ (one sided test  side = "<")
 #p_cond = emmeans(mod, pairwise~ condition, side = "<"); p_cond #for condition (CS+ < CS- left sided!)
 #CI_cond = confint(emmeans(mod, pairwise~ condition),level = 0.95, method = c("boot"), nsim = 5000); 
 #tab =as_tibble(CI_cond$contrasts); tab$contrast = "CS+ > CS-"
-```
-\
-```{r}
+
 #tab %>% kbl() %>%
   #kable_styling(latex_options = "striped", position = "left", full_width = F) 
 ```
 ## Reaction Times by condition
 ```{r PAV_RT_plot, echo=FALSE, warning=FALSE, cache=TRUE}
-PAV.means <- aggregate(PAV.clean$RT, by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$liking, PAV.clean$group), FUN='mean') # extract means
-colnames(PAV.means) <- c('id','condition','liking','group', 'RT')
 # RT
 dfR <- summarySEwithin(PAV.means,
                        measurevar = "RT",
@@ -239,12 +210,10 @@ pp <- ggplot(PAV.means, aes(x = cond, y = RT,
   scale_shape_manual(name="Group", labels=c("Lean", "Obese"), values = c(1, 2)) +
   theme_bw()
 
-
 plt = pp + averaged_theme 
 pp + html_theme 
-
 ```
-```{r, include=FALSE}
+```{r PAV_RT_saveFIG, include=FALSE}
 cairo_pdf('figures/Figure_PavlovianRT.pdf')
 print(plt)
 dev.off()
