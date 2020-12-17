@@ -63,7 +63,7 @@ tdiagnostic <- function(merMod) {
 #   added observed and factorize arguments
 #------------------------------------------------------------------------------------------------------------------------#
 
-pes_ci <- function(formula, data, conf.level, epsilon, anova.type, observed=NULL, factorize=afex_options("factorize"))
+pes_ci <- function(formula, data, conf.level, epsilon, anova.type, observed=NULL, factorize=FALSE)
 {
   
   #----------------------------------------------------------------------------------------------#

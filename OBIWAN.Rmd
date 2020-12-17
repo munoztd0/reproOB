@@ -56,7 +56,6 @@ repro:
 ---
 
 ```{r setup, echo=FALSE, include=FALSE}
-
 knitr::opts_chunk$set(echo = FALSE, warnings=FALSE)
 
 library(repro)
@@ -99,7 +98,6 @@ source('R/utils.R', echo=F)# useful functions
 # this chunk runs R/clean.R (listed in the YAML)
 ```
 
-
 ## Demographics
 ### Summary statistics:
 ```{r demographgics}
@@ -108,45 +106,59 @@ AGE = ddply(df,~group,summarise,mean=mean(age),sd=sd(age), min = min(age), max =
 AGE %>%
   kbl(caption ="AGE", digits = 2) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
-  row_spec(0,bold=T)
+  row_spec(0,bold=T,align='c')
 
 BMI = ddply(df,~group,summarise,mean=mean(BMI_t1),sd=sd(BMI_t1), min = min(BMI_t1), max = max(BMI_t1)); 
 BMI %>%
   kbl(caption ="BMI", digits = 2) %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
-  row_spec(0,bold=T)
+  row_spec(0,bold=T,align='c')
 
 GENDER = ddply(df, .(id, group), summarise, gender=mean(as.numeric(gender)))  %>%
   group_by(gender, group) %>%
   tally(); GENDER$gender = as.factor(revalue(as.factor(GENDER$gender), c("0"="Men", "1"="Women"))); 
   GENDER %>% kbl(caption ="GENDER") %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
-  row_spec(0,bold=T)
+  row_spec(0,bold=T,align='c')
 
 N_group = ddply(df, .(id, group), summarise, group=mean(as.numeric(group)))  %>%
   group_by(group) %>% tally(); N_group$group = as.factor(revalue(as.factor(N_group$group), c("1"="Lean", "2"="Obese"))); 
 N_group %>%
   kbl(caption ="Group") %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%
-  row_spec(0,bold=T)
+  row_spec(0,bold=T,align='c')
 ```
+# Description
+Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)
 
-# Pavlvovian Conditioning Task
-## Analysis: Reaction Times
-Model Selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PAV_T0.R\
-Formula = RT_T ~ condition*group + age + gender + thirsty + hungry + (condition|id) + (1|trialxcondition)\
-//The parametric bootstrap involves sampling from the estimated model whose parameters are replaced by its unbiased estimators taken from the sample. For unequal cell frequencies
+# Pavlvovian Conditioning Task (Analysis: RT)
+Formula = Latency ~ condition*group + age + gender + thirsty + hungry + (condition|id)\
+Latency = time to detect the target (ms)    &     condition = CS+ or CS-
 ```{r PAV_RT, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- RT
-formula = 'RT ~ condition*group + age + gender + thirsty + hungry + (condition|id) + (1|trialxcondition)'
 ### Linear Mixed Models 
 # Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
-model = mixed(formula, data = PAV.clean, method = "LRT", control = control, REML = FALSE); 
+#model = mixed(formula, data = PAV.clean, method = "LRT", control = control, REML = FALSE); 
 #model = mixed(formula, data = PAV.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10, cl=cl)); 
 
-mod <- lmer(formula, data = PAV.clean, control = control, REML = T) # recompute model with REML = T now for further report
+model = aov_car(RT ~ condition*group + age + gender + thirsty + hungry + 
+   Error(id/condition), PAV.means, factorize = F, anova_table = list(correction = "GG", es = "none"))
+table = nice(model); 
+
+#calculate Partial eta-squared and its 90 % CI for each effect
+pes_CI = pes_ci(RT ~ condition*group + age + gender + thirsty + hungry + 
+   Error(id/condition), PAV.means); 
+table$`PES` = pes_CI[,1]
+table$`Lower CI` = pes_CI[,2]
+table$`Upper CI` = pes_CI[,3]
+
+#calculate exclusion BF01 for each effect
+test = extractBF(generalTestBF(RT ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry + id, data= PAV.means, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion)); BF = 1/test[1] #switch to BF10 inclusion
+table$BF10 = BF$bf[order(c(11,10,9,8,7,5,4,3,2,1,6))] # reorder
+
+mod <- lmer(RT ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry + (condition|id), data = PAV.clean, control = control, REML = T) # recompute model with REML = T now for further report
 ref_grid(model)  #triple check everything is centered at 0
-tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Reaction Times (log)", emph.p = TRUE, file = "tmp/temp1.html")#pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+tab_model(mod, show.p = F,show.intercept = F, show.se = T, title ="", show.re.var = F, digits = 3, dv.labels = "Reaction Times", emph.p = TRUE, file = "tmp/temp1.html")#pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
 ```
 \
 ```{r PAV_RT_mod}
@@ -154,23 +166,17 @@ tables <- list.clean(readHTMLTable("tmp/temp1.html"), fun = is.null, recursive =
 tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
 tables2[is.na(tables2)] <- ""
-tables2[1:7,1:3] %>% kbl(caption ="Reaction Times (log)" ) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
-tmp =tables2[8:12,1:2]
+tables2[1:11,1:4] %>% kbl(caption ="Reaction Times" ) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
+tmp =tables2[12:15,1:2]
 names(tmp) <- NULL
 tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) 
 ```
 \
-```{r PAV_RT_BF, cache=TRUE, echo=FALSE, include=FALSE, warning=FALSE}
-#calculate exclusion BF01 for each variable
-test = extractBF(generalTestBF(RT ~ condition*group + age + gender + thirsty + hungry + id, data= PAV.clean, whichRandom = 'id', neverExclude =  'id')); BF = 1/test[1] #switch to BF10 inclusion
-table = nice(model)
-table$BF = rev(BF$bf)
-```
 ```{r PAV_RT_res}
-table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)", digits = 2) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+table %>% kbl(digits = 2) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
 \
 ```{r PAV_RT_cont, echo=FALSE, include=FALSE, cache=TRUE}
@@ -219,31 +225,47 @@ print(plt)
 dev.off()
 ```
 ## Analysis: Pleasantness Ratings (Pavlovian Cue)
-Using ANOVA here because no hierarchical structure\
-Formula = liking ~ condition*group + Error (id/condition)\
-```{r PAV_Lik, cache=TRUE}
+
+Formula = Pleasantness ratings ~ condition*group + age + gender + thirsty + hungry + (1|id)\
+Ratings = how pleasant is the clue (0-100, no repetitions)   &   condition = CS+ or CS-
+```{r PAV_Lik, cache=TRUE, include=FALSE, message=FALSE}
 # -------------------------------------- Liking
-anova.liking <- aov_car(formula = liking ~ condition*group + Error (id/condition), data = PAV.clean, anova_table = list(correction = "GG", es = "pes"), fun_aggregate = mean); 
-``` 
+# Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
+#model = mixed(formula, data = PAV.means, method = "LRT", control = control, REML = FALSE); 
 
-```{r, cache=TRUE, include=FALSE}
-#Partial Eta-Squared with 90% CI \
-pes_lik = pes_ci(liking ~ condition*group + Error (id/condition), PAV.means); 
-#pes_lik %>%
-  #kbl() %>%
-  #kable_styling(latex_options = "striped", position = "left", full_width = F) 
+model = aov_car(liking ~ condition + group + age + gender + thirsty + hungry + Error(id/condition), data= PAV.means, factorize = F, anova_table = list(correction = "GG", es = "none"))
+table = nice(model); 
+
+#calculate Partial eta-squared and its 90 % CI for each effect
+pes_CI = pes_ci(liking ~ condition*group + age + gender + thirsty + hungry + Error(id/condition), PAV.means); 
+table$`PES` = pes_CI[,1]
+table$`Lower CI` = pes_CI[,2]
+table$`Upper CI` = pes_CI[,3]
+
+#calculate exclusion BF01 for each effect
+test = extractBF(generalTestBF(liking ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry + id, data= PAV.means, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion)); BF = 1/test[1] #switch to BF10 inclusion
+table$BF10 = round(BF$bf[order(c(11,10,9,8,7,5,4,3,2,1,6))],2) # reorder
+table$BF10[6] = formatC(BF$bf[11], format = "e", digits = 2)
+
+mod <- lm(liking ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry , data = PAV.means) # for estimated means
+
+ref_grid(model)  #triple check everything is centered at 0
+tab_model(mod, show.p = F,show.intercept = F, show.se = T,  title ="", show.re.var = F, digits = 3, dv.labels = "Pleasantness Ratings (Pavlovian Cue)", emph.p = TRUE, file = "tmp/temp2.html")#pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
 ```
-\
-Bayes factor\
-```{r, cache=TRUE}
-liking.BF <- anovaBF(liking ~ condition*group + id, data = PAV.clean, 
-                     whichRandom = "id", iterations = 5000); 
-BF = as_tibble(liking.BF)[,1:2]
+```{r PAV_lik_res}
+tables <- list.clean(readHTMLTable("tmp/temp2.html"), fun = is.null, recursive = FALSE)
+tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
+tables2 <- as.matrix(tables2) %>% as_tibble()
+tables2[is.na(tables2)] <- ""
+tables2[1:11,1:4] %>% kbl(caption ="Pleasantness Ratings (Pavlovian Cue)" ) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
+tmp =tables2[12:13,1:2]
+names(tmp) <- NULL
+tmp %>% kbl() %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) 
 
-table = nice(anova.liking); table = table[c(2,1,3),]
-table$BF =  signif(as.matrix(BF[-c(3),1]),3)
-table %>% kbl(caption = "Pleasantness Rating", digits = 1) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+table %>% kbl( digits = 2) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
 
 ## Pleasantness Ratings by condition (Pavlvovian Cue)
@@ -275,112 +297,93 @@ pp <- ggplot(PAV.means, aes(x = cond, y = liking,
 pp + html_theme 
 plt = pp + averaged_theme 
 ```
-```{r, include=FALSE}
+```{r PAV_lik_saveFIG, include=FALSE}
 cairo_pdf('figures/Figure_PavlovianLiking.pdf')
 print(plt)
 dev.off()
 ```
 
-# Instrumental Conditioning Task
-```{r INST_prepro, echo=FALSE, warning=FALSE, cache=FALSE}
-#defne factors
-fac <- c("id", "gender", "group")
-INST[fac] <- lapply(INST[fac], factor)
-#revalue all catego
-INST$group = as.factor(revalue(INST$group, c(control="-1", obese="1"))) #change value of group
-
-```
-## Analysis: Number of Grips
-Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_INST.R\
-Formula = grips ~ trial*group + thirsty + hungry  + (1 | id)\
-Model Comparison between linear, quadratic, cubic and spline(5) \
+# Instrumental Conditioning Task (Analysis)
+Formula = Number of grips ~ trial*group +age + gender+ thirsty + hungry  + (trial | id)\
+grips = number of times participant exceeded the force threshold to acquire the reward (Milkshake)
+Model Comparison between linear, quadratic and piecewise with spline at 5 regressions\
 ```{r INST, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- STATS -----------------------------------------------------
 # stat -  different fit
-formu = '*group + (1 |id)'
+formu = '*group +age + gender+ thirsty + hungry'
 ## LINEAR FIT  
-linmod <- lmer(paste('grips~trial', formu),data=INST, control = control, REML = FALSE)
+linmod <- lmer(paste('grips~trial', formu, '+ (trial |id)'),data=INST, control = control, REML = FALSE)
 ## POLYNOMIAL FIT  
-quadmod <- lmer(paste('grips~trial+I(trial^2)', formu), data=INST, control = control, REML = FALSE)
-cubmod <- lmer(paste('grips~trial+I(trial^2)+I(trial^3)', formu),data=INST, control = control, REML = FALSE)
+quadmod <- lmer(paste('grips~trial+I(trial^2)', formu, '+ (trial+I(trial^2) |id)'), data=INST, control = control, REML = FALSE)
 ## PIECEWISE REGRESSION WITH SPLINES
-splinemod <- lmer(paste('grips ~ lspline(trial, 5)', formu),  data = INST, control = control, REML = FALSE)
+splinemod <- lmer(paste('grips ~ lspline(trial, 5)', formu, '+ (lspline(trial, 5) |id)'),  data = INST, control = control, REML = FALSE)
 ```
 \
-```{r cache=TRUE}
-BF_fit = bayesfactor_models(linmod, quadmod, cubmod, splinemod, denominator = linmod) 
+```{r INST_MS, cache=TRUE}
+BF_fit = as_tibble(bayesfactor_models(linmod, quadmod, splinemod, denominator = linmod)); BF_fit$BF10 = formatC(BF_fit$BF, format = "e", digits = 2); BF_fit$BF10[1] = 1; BF_fit = BF_fit[-c(2)]
   kbl(as_tibble(BF_fit), caption = "Model Fit Comparison", digits = 1) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T)
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T,align='c')
 ```
 
 Piecewise Regression with Splines has the best fit\
-```{r cache=TRUE,  include=FALSE, message=FALSE}
-tab_model(splinemod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Number of grips", emph.p = TRUE, file = "tmp/temp2.html",  pred.labels=c("trial &#60 5", "trial > 5", "group[1]", "trial &#60 5 * group[1]", "trial > 5 * group[1]"))
+```{r INST_mod, cache=TRUE,  include=FALSE, message=FALSE}
+
+#model = mixed(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + age + gender+ thirsty + hungry + (1 |id), data = INST, method = "LRT", control = control, REML = FALSE) 
+#model = mixed(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + age + gender+ thirsty + hungry + (1 |id), data = INST, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10000, cl=cl)) 
+
+# model = aov_car(grips ~ lspline(trial, 5)*group  + age + gender + thirsty + hungry + Error(id), data= INST, factorize = F, anova_table = list(correction = "GG", es = "none"), fun_aggregate = mean)
+
+model = as_tibble(anova(splinemod))
+model$Effect = c('trial-spline(5)', 'group', 'age', 'gender', 'thirsty', 'hungry', 'trial-spline(5)*group') #make it nice
+model$df = paste(model$NumDF, signif(model$DenDF,3), sep =', ')
+model$MSE = model$`Mean Sq` ; model$`F` = model$`F value`;model$p.value = signif(model$`Pr(>F)` ,2) 
+table = model[7:11]; table$p.value[1] = '< 0.001'
+# 
+# main = splinemod
+# null = lmer(paste('grips ~ lspline(trial, 5)', formu, '+ (lspline(trial, 5) |id)'),  data = INST, control = control, REML = FALSE)
+# test = anova(main, null, test = 'Chisq')
+# BF_RT = exp((test[1,2] - test[2,2])/2); 
+# 
+# #calculate exclusion BF01 for each effect
+# tmp = lspline(INST.means$trial, 5); INST.means$ls1 = tmp[,1] ; INST.means$ls2 = tmp[,2]
+# test = extractBF(generalTestBF(grips ~ls2*group + age + gender + thirsty + hungry + id, data= INST.means, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion)); BF = 1/test[1] #switch to BF10 inclusion
+# table$BF10 = BF$bf[order(c(11,10,9,8,7,5,4,3,2,1,6))] # reorder
+
+mod <- splinemod
+ref_grid(splinemod)
+
+tab_model(mod, show.p = F,show.intercept = F, show.se = T, title ="", show.re.var = F, digits = 3, dv.labels = "Number of grips", emph.p = TRUE, file = "tmp/temp3.html",  pred.labels=c("trial &#60 5", "trial > 5", "group[1]", "age", "gender[1]", "thirsty", "hungry", "trial &#60 5 * group[1]", "trial > 5 * group[1]"))
 ```
-```{r}
-tables <- list.clean(readHTMLTable("tmp/temp2.html"), fun = is.null, recursive = FALSE)
-tables2 = tables[[1]] %>% row_to_names(row_number = 1)
+```{r INST_mod_tab}
+tables <- list.clean(readHTMLTable("tmp/temp3.html"), fun = is.null, recursive = FALSE)
+tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
 tables2[is.na(tables2)] <- ""
-tables2[1:5,1:3] %>% kbl(caption ="Number of grips", digits = 2) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T)
+tables2[1:9,1:4] %>% kbl(caption ="Number of grips", digits = 2) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T,align='c')
 
-tmp =tables2[6:9,1:2]
+tmp =tables2[10:13,1:2]
 names(tmp) <- NULL
 tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) 
 ```
 \
-```{r, echo=FALSE, include=FALSE, cache=TRUE, message=FALSE, warning=FALSE}
-tmp = lspline(INST$trial, 5); INST$ls1 = tmp[,1] ; INST$ls2 = tmp[,2]
-
-model = mixed(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + (1 |id), data = INST, method = "LRT", control = control, REML = FALSE) 
-#model = mixed(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + thirsty + hungry + piss + (1 |id), data = INST, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10000, cl=cl)) 
-
-main = lmer(grips ~ ls1 + ls2 + group + (1 |id), data = INST, control = control, REML = F)
-null = lmer(grips ~ ls2 + group + (1 |id), data = INST, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_ls1 = exp((test[1,3] - test[2,3])/2); 
-
-main = lmer(grips ~ ls1 + ls2 + group + (1 |id), data = INST, control = control, REML = F)
-null = lmer(grips ~ ls1 + group + (1 |id), data = INST, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_ls2 = exp((test[1,3] - test[2,3])/2); 
-
-main = lmer(grips ~ ls1 + ls2 + group + (1 |id), data = INST, control = control, REML = F)
-null = lmer(grips ~ ls1 + ls2  + (1 |id), data = INST, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_group = exp((test[1,3] - test[2,3])/2); 
-
-main = lmer(grips ~ ls1*ls2*group + (1 |id), data = INST, control = control, REML = F)
-null = lmer(grips ~ ls1 + ls2 + ls2:group + group +(1 |id), data = INST, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_ls1_group = exp((test[1,3] - test[2,3])/2); 
-
-main = lmer(grips ~ ls1*ls2*group  + (1 |id), data = INST, control = control, REML = F)
-null = lmer(grips ~ ls1 + ls2 + ls1:group + group + (1 |id), data = INST, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-BF_ls2_group = exp((test[1,3] - test[2,3])/2); 
-
+```{r INST_BF, echo=FALSE, include=FALSE, cache=TRUE, message=FALSE, warning=FALSE}
+#calculate exclusion BF01 for each variable
+test = extractBF(generalTestBF(grips ~ ls1 + ls1:group + ls2 + ls2:group + group + age + gender+ thirsty + hungry + id, data= INST, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion
 table = nice(model)
-table$BF = BF_ls1
-table$BF[2] = BF_ls2
-table$BF[3] = BF_group
-table$BF[4] = BF_ls1_group
-table$BF[5] = BF_ls2_group
-table$BF = signif(table$BF, 3)
-table$Effect = c("trial < 5" ,"trial > 5","group","trial < 5 * group","trial > 5* group")
+table$BF10 = signif(rev(BF$bf),2)
+table$BF10[2] = formatC(rev(BF$bf)[2], format = "e", digits = 2) #formating
+
+table$Effect = c("trial < 5" ,"trial > 5","group", "age", "gender", "thirsty", "hungry", "trial < 5 * group","trial > 5* group")
 ```
-```{r}
-table %>% kbl(caption ="Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)") %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+```{r INST_res}
+table %>% kbl(caption ="") %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
 
 ## Number of Grips over time
 ```{r INST_plot, echo=FALSE, warning=FALSE, message=FALSE, cache=TRUE}
-# get the averaged dataset
-INST.means <- aggregate(INST$grips, by = list(INST$id, INST$trial, INST$group), FUN='mean') # extract means
-colnames(INST.means) <- c('id','trial','group', 'grips')
 
 #over time
 dfTRIAL <- summarySEwithin(INST.means,
@@ -418,124 +421,78 @@ pp <- ggplot(dfTRIAL, aes(x =trial, y = grips)) +
 pp + html_theme + theme(legend.position=c(.9,.88), axis.text.x = element_text(size = 16))
 plt = pp + averaged_theme + theme(legend.position=c(.9,.88), axis.text.x = element_text(size = 16))
 ```
-```{r echo=FALSE, include = FALSE, warning=FALSE}
+```{r INST_saveFIG, echo=FALSE, include = FALSE, warning=FALSE}
 cairo_pdf('figures/Figure_Instrumental_trial.pdf')
 print(plt)
 dev.off()
 ```
 
-# Pavlvovian-Instrumental Transfer (PIT) Task
-```{r PIT_prepro, echo=FALSE, include=FALSE, cache=FALSE}
-# define as factors
-fac <- c("id", "trial", "condition", "trialxcondition", "gender", "group")
-PIT[fac] <- lapply(PIT[fac], factor)
-#remove the baseline (we just use it for fMRI analysis)
-PIT.clean =  subset(PIT, condition != 'BL') 
-#revalue all catego
-PIT.clean$group = as.factor(revalue(PIT.clean$group, c(control="-1", obese="1"))) #change value of group
-PIT.clean$condition = as.factor(revalue(PIT.clean$condition, c(CSminus="-1", CSplus="1"))); PIT.clean$condition <- factor(PIT.clean$condition, levels = c("1", "-1"))#change value of condition
-#center covariates
-```
-## Analysis: Mobilized effort (AUC)
-Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_PIT.R\
-Formula = AUC ~ condition*group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition)\
-
+# Pavlvovian-Instrumental Transfer (PIT) Task (Analysis)
+Formula = Mobilized effort ~ condition*group + age + gender+ thirsty + hungry + (condition|id)\
+Mobilized effort = Area under the curve of the force exerted exceeding the delivery threshold during Pavlvoian cue presentation
 ```{r PIT, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- STATS -----------------------------------------------
-formula = 'AUC ~ condition*group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition)'
-
 ### Linear Mixed Models 
 # Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
-model = mixed(formula, data = PIT.clean, method = "LRT", control = control, REML = FALSE)
+#model = mixed(formula, data = PIT.clean, method = "LRT", control = control, REML = FALSE)
 #model = mixed(formula, data = PIT.clean, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10000, cl=cl)) 
 
-ref_grid(model)  #triple check everything is centered at 0
+model = aov_car(AUC ~ condition*group + age + gender+ thirsty + hungry +  Error(id/condition), data= PIT.means, factorize = F, anova_table = list(correction = "GG", es = "none"))
+table = nice(model); 
 
-mod <- lmer(formula, data = PIT.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
+#calculate Partial eta-squared and its 90 % CI for each effect
+pes_CI = pes_ci(AUC ~ condition*group + age + gender+ thirsty + hungry +  Error(id/condition), PIT.means); 
+table$`PES` = pes_CI[,1]
+table$`Lower CI` = pes_CI[,2]
+table$`Upper CI` = pes_CI[,3]
 
-tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Mobilized effort (AUC)", file = "tmp/temp3.html") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+#calculate exclusion BF01 for each effect
+test = extractBF(generalTestBF(AUC ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry + id, data= PIT.means, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion)); BF = 1/test[1] #switch to BF10 inclusion
+table$BF10 = BF$bf[order(c(11,10,9,8,7,5,4,3,2,1,6))] # reorder
 
-PIT.means <- aggregate(PIT.clean$AUC, by = list(PIT.clean$id, PIT.clean$condition, PIT.clean$group), FUN='mean') # extract means
-colnames(PIT.means) <- c('id','condition', 'group', 'n_grips')
-test = aov_car(AUC ~ condition*group  + hungry + thirsty  + gender + age +
-  Error(id/condition), PIT.clean, factorize = F, fun_aggregate = mean)
+mod <- lmer(AUC ~ condition*group + condition*age + condition*gender+ condition*thirsty + condition*hungry + (condition|id), data = PIT.clean, control = control, REML = T) # recompute model with REML = T now for further analysis
+
+tab_model(mod, show.p = F,show.intercept = F, show.se = T, title ="", show.re.var = F, digits = 3, dv.labels = "Mobilized effort (a.u.)", file = "tmp/temp4.html") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
 ```
 \
-```{r, echo=FALSE}
-tables <- list.clean(readHTMLTable("tmp/temp3.html"), fun = is.null, recursive = FALSE)
-tables2 = tables[[1]] %>% row_to_names(row_number = 1)
+```{r PIT_mod, echo=FALSE}
+tables <- list.clean(readHTMLTable("tmp/temp4.html"), fun = is.null, recursive = FALSE)
+tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
 tables2[is.na(tables2)] <- ""
-tables2[1:5,1:3] %>% kbl(caption ="Mobilized effort (AUC)" ) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T)
+tables2[1:11,1:4] %>% kbl(caption ="Mobilized effort (a.u.)" ) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T,align='c')
 
-tmp =tables2[6:10,1:2]
+tmp =tables2[12:15,1:2]
 names(tmp) <- NULL
 tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  
 
-main = lmer(AUC ~ condition + group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-null = lmer(AUC ~ group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_cond = exp((test[1,2] - test[2,2])/2)
-
-main = lmer(AUC ~ condition + group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-null = lmer(AUC ~ condition + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_group = exp((test[1,2] - test[2,2])/2)
-
-main = lmer(formula, data = PIT.clean, control = control, REML = F)
-null = lmer(AUC ~ condition+ group + hungry + hungry:condition  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_inter = exp((test[1,2] - test[2,2])/2)
-
-main = lmer(AUC ~ condition* group + thirsty + hungry  + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-null = lmer(AUC ~ condition*group + thirsty +(condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F) #here is jsut added "thirsty" to make that the two models are fitted with the same number of partcipants, but this doesnt changew anything for hungry
-test = anova(main, null, test = 'Chisq')
-
-BF_hungry = exp((test[1,2] - test[2,2])/2)
-
-main = lmer(formula, data = PIT.clean, control = control, REML = F)
-null = lmer(AUC ~ condition*group + hungry + (condition|id) + (1|trialxcondition), data = PIT.clean, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_hungry_int = exp((test[1,2] - test[2,2])/2)
-
-table = nice(model)
-table$BF = BF_cond
-table$BF[2] = BF_group
-table$BF[3] = BF_hungry
-table$BF[4] = BF_inter
-table$BF[5] = BF_hungry_int
 ```
 
-```{r}
-table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)", digits = 2) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+```{r PIT_res}
+table %>% kbl( digits = 2) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
-
 \
-```{r, echo=FALSE, include=FALSE, cache=TRUE}
+```{r PIT_cont, echo=FALSE, include=FALSE, cache=TRUE}
 #p_cond = emmeans(mod, pairwise~ condition, side = ">"); p_cond #for condition (CS+ > CS- right sided)
 #CI_cond = confint(emmeans(mod, pairwise~ condition),level = 0.95, method = c("boot"), nsim = 5000); #CI_cond$contrasts #get CI condition
 
-inter = emmeans(mod, pairwise~ condition|group, adjust = "tukey", side = ">")  #for group X condition (adjusted but still right sided)
-CI_inter = confint(emmeans(mod, pairwise~ condition|group),level = 0.95,method = c("boot"),nsim = 5000) ##get CI inter
+inter = emmeans(model, pairwise~ condition|group, adjust = "tukey", side = ">")  #for group X condition (adjusted but still right sided)
+CI_inter = confint(emmeans(model, pairwise~ condition|group),level = 0.95,method = c("boot"),nsim = 5000) ##get CI inter
 tmp = as_tibble(inter$contrasts); 
-tab =as_tibble(CI_inter$contrasts); tab$contrast = "CS+ > CS-"; tab$group = c("Lean", "Obese"); tab = select(tab, -c('df')); tab$t = tmp$t.ratio; tab$p = tmp$p.value; #tab$df = c(26,61);
+tab =as_tibble(CI_inter$contrasts); tab$contrast = "CS+ > CS-"; tab$group = c("Lean", "Obese"); tab$T = tmp$t.ratio; tab$p.value = tmp$p.value; 
 ```
 \
-```{r}
-tab %>% kbl(caption = "Post-Hoc test (pairwise~ condition|group, adjust = tukey)", digits = 3) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+```{r PIT_cont_tab}
+tab %>% kbl(caption = "Post-Hoc test CS+ > CS- by group (adjusted Tukey HSD)", digits = 3) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
 
 ## Mobilized effort (AUC) difference (CS+ > CS-) by group
 ```{r PIT_plot, echo=FALSE, warning=FALSE, cache=TRUE}
-knitr::opts_chunk$set(echo = FALSE, dev.args = list(png = list(type = "cairo")))
+
 # create bin for each mini block
 #PIT.clean$trialxcondition    <- as.numeric(PIT.clean$trialxcondition)
 #PIT.clean  <- ddply(PIT.clean, "id", transform, bin = as.numeric(cut2(trialxcondition, g = 5)))
@@ -571,8 +528,8 @@ pp <- ggplot(cont.means, aes(x = groupi, y = force,
   #geom_errorbar(data = dfP,aes(group = group, ymin=force-SE, ymax=force+SE),position=position_nudge(x=0.15), size=0.5, width=0.1,  color = "black") + 
   ylab('\u0394 Mobilized effort (CS+ > CS-)')+
   xlab('')+
-  scale_fill_manual(values=c("1" = pal[6],"-1"=pal[1]), guide = 'none') +
-  scale_color_manual(values=c("1" = pal[6],"-1"=pal[1]), guide = 'none')  +
+  scale_fill_manual(values=c("1" = pal[6],"0"=pal[1]), guide = 'none') +
+  scale_color_manual(values=c("1" = pal[6],"0"=pal[1]), guide = 'none')  +
   scale_y_continuous(expand = c(0, 0), breaks = c(seq.int(-200,200, by = 50)), limits = c(-200.5,200.5)) +
   scale_x_continuous(labels=c("Obese", "Lean"),breaks = c(-.25,.25), limits = c(-.5,.5)) +
   theme_bw() 
@@ -580,15 +537,16 @@ pp <- ggplot(cont.means, aes(x = groupi, y = force,
 plt = pp + averaged_theme 
 pp + html_theme 
 ```
-```{r echo=FALSE, include = FALSE, warning=FALSE}
+```{r PIT_saveFIG, echo=FALSE, include = FALSE, warning=FALSE}
 cairo_pdf('figures/Figure_PIT_con.pdf')
 print(plt)
 dev.off()
 ```
+
 ## Mobilized effort (AUC) over time
 ```{r PIT_time, echo=FALSE, warning=FALSE, cache=TRUE}
 # PLOT OVERTIME
-labels <- c("-1" = "Lean", "1" = "Obese")
+labels <- c("0" = "Lean", "1" = "Obese")
 PIT.p <- summarySEwithin(PIT.clean,
                          measurevar = "AUC",
                          withinvars = c("trialxcondition","condition"),
@@ -606,7 +564,7 @@ pp <- ggplot(PIT.p, aes(x = as.numeric(trial), y = AUC,
   geom_line(alpha = .5, size = 1, show.legend = F) +
   geom_ribbon(aes(ymax = AUC + se, ymin = AUC - se),  alpha=0.4) + 
   geom_point() +
-  ylab('Mobilized effort (AUC)')+
+  ylab('Mobilized effort (a.u.)')+
   xlab('Trial')+
   scale_color_manual(labels = c('-1'= 'CS-', "1" = 'CS+'), name="", 
                      values = c("1"= pal[2], '-1'= pal[1])) +
@@ -621,132 +579,62 @@ pp <- ggplot(PIT.p, aes(x = as.numeric(trial), y = AUC,
 pp + html_theme + theme(strip.background = element_rect(fill="white"), legend.key.size = unit(0.3, "cm"), axis.text.x = element_text(size = 16))
 plt = pp + averaged_theme + theme(strip.background = element_rect(fill="white"), legend.key.size = unit(0.8, "cm"), axis.text.x = element_text(size = 16))
 ```
-```{r echo=FALSE, include = FALSE, warning=FALSE}
+```{r PIT_time_saveFIG, echo=FALSE, include = FALSE, warning=FALSE}
 cairo_pdf('figures/Figure_PIT_time.pdf')
 print(plt)
 dev.off()
 ```
-# Hedonic Reactivity Task
-```{r HED_prepro, echo=FALSE, include=FALSE, cache=FALSE}
-# define as.factors
-fac <- c("id", "trial", "condition", "trialxcondition", "gender", "group")
-HED[fac] <- lapply(HED[fac], factor)
-
-#revalue all catego
-HED$condition = as.factor(revalue(HED$condition, c(MilkShake="1", Empty="-1"))) #change value of condition
-HED$condition <- relevel(HED$condition, "1") # Make MilkShake first
-HED$group = as.factor(revalue(HED$group, c(obese="1", control="-1"))) #change value of group
-
-# create Intensity and Familiarity diff
-bs = ddply(HED, .(id, condition), summarise, int = mean(perceived_intensity, na.rm = TRUE), fam = mean(perceived_familiarity, na.rm = TRUE)) 
-Empty = subset(bs, condition == "-1"); Milkshake = subset(bs, condition == "1"); diff = Empty;
-diff$int = Milkshake$int - Empty$int; diff$fam = Milkshake$fam - Empty$fam;
-HED = merge(x = HED, y = diff[ , c("int", "fam", 'id')], by = "id", all.x=TRUE)
-
-#center covariates
-numer <- c("fam", "int")
-HED = HED %>% group_by %>% mutate_at(numer, scale)
-HED$intensity = HED$int; HED$familiarity = HED$fam
-```
-## Analysis: Pleasantness Ratings (Taste)
-Model selection we followed Barr et al. (2013) approach to contruct random structure and covariates SEE --> R/MS_HED.R\
-Formula = Pleasantness ~ condition*group  + hungry + hungry:condition + familiarity + intensity + intensity:condition + (condition |id) + (1|trialxcondition)\
-
+# Hedonic Reactivity Test (Analysis)
+Formula = Pleasantness ratings ~ condition*group + age + gender+ thirsty + hungry + intensity + Error(id/condition)\
+Pleasantness ratings = how pleasant is the liquid solution rated (0-100, with repetitions)   &   condition = Milshake or Tasteless   &   intensity = difference on how intense the liquid solution were rated (mean(Milshake) - mean(Tasteless))
 ```{r HED, echo=FALSE, include=FALSE, cache=TRUE}
 # -------------------------------------- STATS -----------------------------------------------
-formula = 'perceived_liking ~ condition*group + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition)'
 
 ### Linear Mixed Models 
 # Mixed is just a wrapper for lmer to get p-values from parametric bootstrapping #but set to method "LRT" and remove "args_test" to quick check ##
-model = mixed(formula, data = HED, method = "LRT", control = control, REML = FALSE); model
+#model = mixed(formula, data = HED, method = "LRT", control = control, REML = FALSE); 
 #model = mixed(formula, data = HED, method = "PB", control = control, REML = FALSE, args_test = list(nsim = 10000, cl=cl)) 
+model = aov_car(perceived_liking ~ condition*group + age + gender+ thirsty + hungry + intensity + Error(id/condition), data= HED.means, factorize = F, anova_table = list(correction = "GG", es = "none"))
+table = nice(model); 
 
-ref_grid(model)  #triple check everything is centered at 0
+#calculate Partial eta-squared and its 90 % CI for each effect
+pes_CI = pes_ci(perceived_liking ~ condition*group + age + gender+ thirsty + hungry + intensity + Error(id/condition), HED.means); 
+table$`PES` = pes_CI[,1]
+table$`Lower CI` = pes_CI[,2]
+table$`Upper CI` = pes_CI[,3]
 
-mod <- lmer(formula, data = HED, control = control, REML = T) # recompute model with REML = T now for further analysis
+#calculate exclusion BF01 for each effect
+test = extractBF(generalTestBF(perceived_liking ~ condition*group + condition*age + condition*gender + condition*thirsty + condition*hungry + condition*intensity + id, data= HED.means, whichRandom = 'id', neverExclude =  'id', whichModels ="top")); BF = 1/test[1] #switch to BF10 inclusion)); BF = 1/test[1] #switch to BF10 inclusion
+table$BF10 = round(BF$bf[order(c(13, 12, 11, 10,  9,  8, 6,  5,  4,  3,  2, 1, 7))],2) # reorder
+table$BF10[7] = formatC(BF$bf[13], format = "e", digits = 2)
 
-tab_model(mod, show.p = F,show.intercept = F, show.se = T, show.ci = F, title ="", show.re.var = F, digits = 3, dv.labels = "Pleasantness Ratings", file = "tmp/temp4.html") #, pred.labels=c("CS+", "Lean", "Interaction (Lean:CS+)")
+mod <- lmer(perceived_liking ~ condition*group + age + gender+ thirsty + hungry  +  familiarity + intensity + (condition |id), data = HED, control = control, REML = T) # recompute model with REML = T now for further analysis
+ref_grid(mod)  #triple check everything is centered at 0
+
+tab_model(mod, show.p = F,show.intercept = F, show.se = T,  title ="", show.re.var = F, digits = 3, dv.labels = "Pleasantness Ratings", file = "tmp/temp5.html")
 ```
 \
-```{r, echo=FALSE, warning=FALSE}
-tables <- list.clean(readHTMLTable("tmp/temp4.html"), fun = is.null, recursive = FALSE)
-tables2 = tables[[1]] %>% row_to_names(row_number = 1)
+```{r HED_mod, echo=FALSE, warning=FALSE}
+tables <- list.clean(readHTMLTable("tmp/temp5.html"), fun = is.null, recursive = FALSE)
+tables2 = tables[[1]] %>% janitor::row_to_names(row_number = 1)
 tables2 <- as.matrix(tables2) %>% as_tibble()
 tables2[is.na(tables2)] <- ""
-tables2[1:7,1:3] %>% kbl(caption ="Mobilized effort (AUC)" ) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T)
+tables2[1:11,1:4] %>% kbl(caption ="Pleasantness ratings (taste)" ) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  %>%  row_spec(0,bold=T,align='c')
 
-tmp =tables2[8:12,1:2]
+tmp =tables2[12:16,1:2]
 names(tmp) <- NULL
 tmp %>% kbl() %>%
   kable_styling(latex_options = "HOLD_position", position = "center", full_width = F)  
-
-main = lmer(perceived_liking ~ condition+group + thirsty + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ group+ thirsty + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_cond = exp((test[1,3] - test[2,3])/2)
-
-
-main = lmer(perceived_liking ~ condition+group + thirsty + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition+ thirsty + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq')
-
-BF_group = exp((test[1,3] - test[2,3])/2)
-
-main = lmer(perceived_liking ~ condition*group + thirsty + hungry  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition*group + thirsty  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq') # here i added thirsty to make sure the to mdoels are fitted on the same number of responses
-
-BF_hungry = exp((test[1,3] - test[2,3])/2)
-
-
-main = lmer(perceived_liking ~ condition*group + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition*group + hungry+ hungry:condition + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq') 
-
-BF_fam = exp((test[1,3] - test[2,3])/2)
-
-main = lmer(perceived_liking ~ condition*group + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition*group + hungry + hungry:condition + familiarity +  (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq') 
-
-BF_int = exp((test[1,3] - test[2,3])/2)
-
-main = lmer(perceived_liking ~ condition*group  + hungry + hungry:condition  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition+group + hungry  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq') 
-
-BF_group_inter = exp((test[1,3] - test[2,3])/2)
-
-main = lmer(perceived_liking ~ condition*group + thirsty + hungry + hungry:condition +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-null = lmer(perceived_liking ~ condition*group+ thirsty + hungry  +  familiarity + intensity + (condition |id) + (1|trialxcondition), data = HED, control = control, REML = F)
-test = anova(main, null, test = 'Chisq') # same here 
-
-BF_hungry_inter = exp((test[1,3] - test[2,3])/2)
-
-
-table = nice(model)
-table$BF = c(0,0,0,0,0,0,0)
-table$BF[1] = BF_cond
-table$BF[2] = BF_group
-table$BF[3] = BF_hungry
-table$BF[4] = BF_fam
-table$BF[5] = BF_int
-table$BF[6] = BF_group_inter
-table$BF[7] = BF_hungry_inter
 ```
 
-```{r}
-table %>% kbl(caption = "Parametric Bootstrap Test method to evaluate significance of fixed effects in mixed-effects models (using MLE fit, nsim = 500) and Bayes Factor from mixed models (see Wagenmakers, 2007)", digits = 2) %>%
-  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T)
+```{r HED_res}
+table %>% kbl( digits = 2) %>%
+  kable_styling(latex_options = "HOLD_position", position = "center", full_width = F) %>%  row_spec(0,bold=T,align='c')
 ```
 
 ## Pleasantness Ratings (Taste) by condition
 ```{r HED_plot, echo=FALSE, warning=FALSE, cache=TRUE}
-HED.means <- aggregate(HED$perceived_liking, by = list(HED$id, HED$condition, HED$group), FUN='mean') # extract means
-colnames(HED.means) <- c('id','condition','group', 'perceived_liking')
-
 
 # AVERAGED EFFECT
 dfH <- summarySEwithin(HED.means,
@@ -780,7 +668,7 @@ pp <- ggplot(HED.means, aes(x = cond, y = perceived_liking,
 plt <- pp + averaged_theme
 pp + html_theme
 ```
-```{r echo=FALSE, include = FALSE, warning=FALSE}
+```{r HED_saveFIG, echo=FALSE, include = FALSE, warning=FALSE}
 cairo_pdf('figures/Figure_HED.pdf')
 print(plt)
 dev.off()
@@ -825,7 +713,7 @@ plt <- pp + averaged_theme + guides(shape = guide_legend(order = 1)) + theme(leg
 pp + html_theme + guides(shape = guide_legend(order = 1)) + theme(legend.margin=margin(0,0,0,0), legend.box = "horizontal", legend.key.size = unit(0.4, "cm"), axis.text.x = element_text(size = 16), legend.position = c(0.8, 0.915)) 
 
 ```
-```{r echo=FALSE, include = FALSE, warning=FALSE}
+```{r HED_time_saveFIG, echo=FALSE, include = FALSE, warning=FALSE}
 cairo_pdf('figures/Figure_HED_time.pdf')
 print(plt)
 dev.off()
