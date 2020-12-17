@@ -1,16 +1,21 @@
 #----clean----
 #subset only pretest
 tables <- c("PAV","INST","PIT","HED", "intern")
-dflist <- lapply(mget(tables),function(x)subset(x, session == 'second'))
+dflist <- lapply(mget(tables),function(x)subset(x, group == 'obese'))
 list2env(dflist, envir=.GlobalEnv)
+intern = subset(intern, session == 'third') #only last session
+
 
 #exclude participants (242 really outlier everywhere, 256 can't do the task, 114 & 228 REALLY hated the solution and thus didn't "do" the conditioning) & 123 and 124 have imcomplete data
-`%notin%` <- Negate(`%in%`)
-dflist <- lapply(mget(tables),function(x)filter(x, id %notin% c(242, 256, 114, 228, 123, 124)))
-list2env(dflist, envir=.GlobalEnv)
+# `%notin%` <- Negate(`%in%`)
+# dflist <- lapply(mget(tables),function(x)filter(x, id %notin% c(242, 256, 114, 228, 123, 124)))
+# list2env(dflist, envir=.GlobalEnv)
+
+PIT.means <- aggregate(PIT$AUC, by = list(PIT$id, PIT$condition, PIT$session), FUN='mean') # extract means
+colnames(PIT.means) <- c('id', 'condition','session', 'intervention', 'AUC')
+PIT.means = spread(PIT.means, session, AUC)
 
 #merge with info
-tables = tables[-length(tables)] # remove intern
 dflist <- lapply(mget(tables),function(x)merge(x, info, by = "id"))
 list2env(dflist, envir=.GlobalEnv)
 
@@ -19,29 +24,26 @@ listA = 2:5
 def = function(data, number){
   baseINTERN = subset(intern, phase == number)
   data = merge(x = get(data), y = baseINTERN[ , c("thirsty", 'hungry', 'id')], by = "id", all.x=TRUE)
-  # diffINTERN = subset(intern, phase == number | phase == number+1) #before and after 
-  # before = subset(diffINTERN, phase == number); after = subset(diffINTERN, phase == number+1); diff = after
-  # diff$diff_piss = diff$piss - before$piss
-  # diff$diff_thirsty = diff$thirsty - before$thirsty
-  # diff$diff_hungry = diff$hungry - before$hungry
-  # data= merge(data, y = diff[ , c("diff_piss", "diff_thirsty", 'diff_hungry', 'id')], by = "id", all.x=TRUE)
+  data$diff_BMI = data$BMI_t1 - data$BMI_t2
+  data$diff_BMIz = data$BMI_t1 - data$BMI_t2
   return(data)
 }
 dflist = mapply(def,tables,listA)
 list2env(dflist, envir=.GlobalEnv)
 
 
+
+
 #center covariates
-numer <- c("thirsty", "hungry", "age")
-tables <- c("PAV","INST","PIT","HED")
+numer <- c("thirsty", "hungry", "age", "diff_BMIz", "BMI_t1")
 dflist <- lapply(mget(tables),function(x) x %>% group_by %>% mutate_at(numer, scale))
 list2env(dflist, envir=.GlobalEnv)
 
 
 #imput mean (0 since its mean centered) for the two participant that have missing covariate (MAR) data so we can still use them in ANCOVA
-tables <- c("PAV","INST","PIT","HED")
-dflist <- lapply(mget(tables),function(x) imput(x))
-list2env(dflist, envir=.GlobalEnv)
+# tables <- c("PAV","INST","PIT","HED")
+# dflist <- lapply(mget(tables),function(x) imput(x))
+# list2env(dflist, envir=.GlobalEnv)
 
 
 

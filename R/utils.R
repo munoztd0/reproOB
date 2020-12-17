@@ -268,5 +268,10 @@ imput = function(x) {
 return(x)
 }
 
+interact = function(x) {
+  x$idXsession <- ifelse(x$session == 'third', x$id + 2000, x$id)
+  return(x)
+}
+
 
 scale_this <- function(x, na.rm = TRUE) (x - mean(x, na.rm = na.rm)) / sd(x, na.rm) 
