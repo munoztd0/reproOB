@@ -275,3 +275,16 @@ interact = function(x) {
 
 
 scale_this <- function(x, na.rm = TRUE) (x - mean(x, na.rm = na.rm)) / sd(x, na.rm) 
+
+internal = function(data, number){
+  baseINTERN = subset(intern, phase == number)
+  data = merge(x = get(data), y = baseINTERN[ , c("thirsty", 'hungry', 'id')], by = "id", all.x=TRUE)
+  return(data)
+}
+
+diffX = function(x){
+  x$diff_BMI = x$BMI_t1 - x$BMI_t2
+  x$diff_BMIz = x$BMI_t1 - x$BMI_t2
+  return(x)
+}
+`%notin%` <- Negate(`%in%`)

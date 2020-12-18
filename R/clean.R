@@ -7,50 +7,14 @@ intern = subset(intern, session == 'third') #only last session
 
 
 #exclude participants (242 really outlier everywhere, 256 can't do the task, 114 & 228 REALLY hated the solution and thus didn't "do" the conditioning) & 123 and 124 have imcomplete data
-# `%notin%` <- Negate(`%in%`)
 # dflist <- lapply(mget(tables),function(x)filter(x, id %notin% c(242, 256, 114, 228, 123, 124)))
 # list2env(dflist, envir=.GlobalEnv)
 
-PIT.means <- aggregate(PIT$AUC, by = list(PIT$id, PIT$condition, PIT$session), FUN='mean') # extract means
-colnames(PIT.means) <- c('id', 'condition','session', 'intervention', 'AUC')
-PIT.means = spread(PIT.means, session, AUC)
 
-#merge with info
-dflist <- lapply(mget(tables),function(x)merge(x, info, by = "id"))
-list2env(dflist, envir=.GlobalEnv)
-
-# creates internal states variables for each data
-listA = 2:5
-def = function(data, number){
-  baseINTERN = subset(intern, phase == number)
-  data = merge(x = get(data), y = baseINTERN[ , c("thirsty", 'hungry', 'id')], by = "id", all.x=TRUE)
-  data$diff_BMI = data$BMI_t1 - data$BMI_t2
-  data$diff_BMIz = data$BMI_t1 - data$BMI_t2
-  return(data)
-}
-dflist = mapply(def,tables,listA)
-list2env(dflist, envir=.GlobalEnv)
-
-
-
-
-#center covariates
-numer <- c("thirsty", "hungry", "age", "diff_BMIz", "BMI_t1")
-dflist <- lapply(mget(tables),function(x) x %>% group_by %>% mutate_at(numer, scale))
-list2env(dflist, envir=.GlobalEnv)
-
-
-#imput mean (0 since its mean centered) for the two participant that have missing covariate (MAR) data so we can still use them in ANCOVA
-# tables <- c("PAV","INST","PIT","HED")
-# dflist <- lapply(mget(tables),function(x) imput(x))
-# list2env(dflist, envir=.GlobalEnv)
-
-
-
-# prepro RT PAv -----------------------------------------------------------
+# prepro RT PAV -----------------------------------------------------------
 
 # get times in milliseconds 
-PAV$RT               <- PAV$RT * 1000
+PAV$RT    <- PAV$RT * 1000
 
 #Preprocessing
 PAV$condition <- droplevels(PAV$condition, exclude = "Baseline")
@@ -69,75 +33,137 @@ dropped = full-clean
 (dropped*100)/full
 
 
-PAV = PAV.clean
+# gather PAV --------------------------------------------------------------------
+
+PAV.means <- aggregate(list(RT=PAV.clean$RT, liking=PAV.clean$liking), by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$session), FUN='mean') # extract means
+PAV.means = PAV.means %>% gather(variable, value, (RT:liking)) %>%  unite(var, variable,Group.3) %>% spread(var, value)
+colnames(PAV.means) <- c('id','condition', 'baseline_lik', 'liking', 'baseline_RT', 'RT')
+PAV.means = filter(PAV.means, id %notin% c(230)) # remove 230 because it doesnt have CS minus condition
+PAV.means = na.omit(PAV.means); # remove dropout participants
+
+# create baseline diff
+Empty = subset(PAV.means, condition == "CSminus"); Milkshake = subset(PAV.means, condition == "CSplus"); diff = Empty;
+diff$diff_base_lik = Milkshake$baseline_lik - Empty$baseline_lik; diff$diff_base = Empty$baseline_RT - Milkshake$baseline_RT; # reverse for RT because we are looking at latency
+PAV.means = merge(x = PAV.means, y = diff[ , c("diff_base_lik", "diff_base", 'id')], by = "id", all.x=TRUE)
+
+PAV.means = PAV.means %>% group_by %>% mutate_at(c('diff_base_lik'), scale)
+
+# gather INST -------------------------------------------------------------
+INST$spline = as.factor(ifelse(INST$trial > 5, 0, 1)) # create spline factor (learning phase <5, then >5)
+INST.means <- aggregate(INST$grips, by = list(INST$id, INST$spline, INST$session), FUN='mean') # extract means
+INST.means = spread(INST.means, Group.3, x)
+colnames(INST.means) <- c('id','spline','baseline', 'grips')
+
+INST2 <- aggregate(INST$grips, by = list(INST$id, INST$trial, INST$session), FUN='mean') # extract means
+INST2 = spread(INST2, Group.3, x)
+colnames(INST2) <- c('id','trial','baseline', 'grips')
+# tmp = lspline(INST.means$trial, 5); INST.means$ls1 = tmp[,1] ; INST.means$ls2 = tmp[,2]
+INST.means = na.omit(INST.means); # remove dropout participants
+
+# create baseline diff
+
+First = subset(INST.means, spline == "0"); Last = subset(INST.means, spline == "1");  diff = First; diff$diff_base = First$base - Last$base
+INST.means = merge(x = INST.means, y = diff[ , c("diff_base", 'id')], by = "id", all.x=TRUE)
+
+# gather PIT --------------------------------------------------------------------
+
+PIT.means <- aggregate(PIT$AUC, by = list(PIT$id, PIT$condition, PIT$session), FUN='mean') # extract means
+PIT.means = spread(PIT.means, Group.3, x)
+colnames(PIT.means) <- c('id', 'condition','baseline', 'AUC')
+
+#remove the baseline (we just use it for fMRI analysis)
+PIT.means =  subset(PIT.means, condition != 'BL') 
+
+PIT.means = na.omit(PIT.means); # remove dropout participants
+
+# create baseline diff
+Empty = subset(PIT.means, condition == "CSminus"); Milkshake = subset(PIT.means, condition == "CSplus"); diff = Empty;
+diff$diff_base = Milkshake$baseline - Empty$baseline
+PIT.means = merge(x = PIT.means, y = diff[ , c("diff_base", 'id')], by = "id", all.x=TRUE)
+
+
+# gather HED --------------------------------------------------------------
+
+HED.means <- aggregate(list(liking=HED$perceived_liking, intensity=HED$perceived_intensity, familiarity=HED$perceived_familiarity), by = list(HED$id, HED$condition, HED$session), FUN='mean') # extract means
+HED.means = HED.means %>% gather(variable, value, (liking:familiarity)) %>%  unite(var, variable,Group.3) %>% spread(var, value)
+colnames(HED.means) <- c('id','condition', 'baseline_fam', 'familiarity', 'baseline_int', 'intensity', 'baseline_lik', 'liking')
+
+HED.means = na.omit(HED.means); # remove dropout participants
+
+
+# create Intensity and Familiarity diff
+Empty = subset(HED.means, condition == "Empty"); Milkshake = subset(HED.means, condition == "MilkShake"); diff = Empty;
+diff$int = Milkshake$intensity - Empty$intensity; diff$fam = Milkshake$familiarity - Empty$familiarity;
+HED.means = merge(x = HED.means, y = diff[ , c("int", "fam", 'id')], by = "id", all.x=TRUE)
+
+# create baseline diff
+diff$diff_base = Milkshake$baseline_lik - Empty$baseline_lik
+HED.means = merge(x = HED.means, y = diff[ , c("diff_base", 'id')], by = "id", all.x=TRUE)
+
+
+#merge with info
+tables = c('PAV.means', 'INST.means', 'PIT.means', 'HED.means')
+dflist <- lapply(mget(tables),function(x)merge(x, info, by = "id"))
+list2env(dflist, envir=.GlobalEnv)
+
+# creates diff BMI for each data
+dflist <- lapply(mget(tables),function(x) diffX(x))
+list2env(dflist, envir=.GlobalEnv)
+
+# creates internal states variables for each data
+listA = 2:5
+dflist = mapply(internal,tables,listA)
+list2env(dflist, envir=.GlobalEnv)
+
+PAV.means$BMI1 = PAV.means$BMI_t1 # keep it unstandadized for later
+
+#center covariates
+dflist <- lapply(mget(tables),function(x) x %>% group_by %>% mutate_at(c("thirsty", "hungry", "age", "diff_BMIz", "BMI_t1", "diff_base"), scale))
+list2env(dflist, envir=.GlobalEnv)
+
+#imput mean (0 since its mean centered) for the two participant that have missing covariate (MAR) data so we can still use them in ANCOVA (this happens only for thirsty and hungry) in PAV 232 // 231 & 239 in INST
+tables <- c("PAV.means", "INST.means")
+dflist <- lapply(mget(tables),function(x) imput(x))
+list2env(dflist, envir=.GlobalEnv)
+
 
 
 # clean PAV --------------------------------------------------------------
 
 # define as.factors
-fac <- c("id", "trial", "condition", "group" ,"trialxcondition", "gender")
-PAV.clean[fac] <- lapply(PAV.clean[fac], factor)
+fac <- c("id", "condition", "gender", "intervention")
+PAV.means[fac] <- lapply(PAV.means[fac], factor)
 
 #revalue all catego
-PAV.clean$group = as.factor(revalue(PAV.clean$group, c(control="0", obese="1"))) #change value of group
-PAV.clean$condition = as.factor(revalue(PAV.clean$condition, c(CSminus="-1", CSplus="1"))); PAV.clean$condition <- factor(PAV.clean$condition, levels = c("1", "-1"))#change value of condition
-
-PAV.means <- aggregate(PAV.clean$RT, by = list(PAV.clean$id, PAV.clean$condition, PAV.clean$liking, PAV.clean$group, PAV.clean$age, PAV.clean$gender, PAV.clean$thirsty,PAV.clean$hungry), FUN='mean') # extract means
-colnames(PAV.means) <- c('id','condition','liking','group', 'age','gender', 'thirsty', 'hungry', 'RT')
-
-
-# clean INST -------------------------------------------------------------
-
-#defne factors
-fac <- c("id", "gender", "group")
-INST[fac] <- lapply(INST[fac], factor)
-#revalue all catego
-INST$group = as.factor(revalue(INST$group, c(control="0", obese="1"))) #change value of group
-
-
-# get the averaged dataset
-INST.means <- aggregate(INST$grips, by = list(INST$id, INST$trial, INST$group, INST$age, INST$gender, INST$thirsty, INST$hungry), FUN='mean') # extract means
-colnames(INST.means) <- c('id','trial','group', 'age','gender', 'thirsty', 'hungry', 'grips')
-tmp = lspline(INST.means$trial, 5); INST.means$ls1 = tmp[,1] ; INST.means$ls2 = tmp[,2]
+PAV.means$condition = as.factor(revalue(PAV.means$condition, c(CSminus="-1", CSplus="1"))); PAV.means$condition <- factor(PAV.means$condition, levels = c("1", "-1"))#change value of condition
 
 
 # clean PIT --------------------------------------------------------------
 
 # define as factors
-fac <- c("id", "trial", "condition", "trialxcondition", "gender", "group")
-PIT[fac] <- lapply(PIT[fac], factor)
-#remove the baseline (we just use it for fMRI analysis)
-PIT.clean =  subset(PIT, condition != 'BL') 
-#revalue all catego
-PIT.clean$group = as.factor(revalue(PIT.clean$group, c(control="0", obese="1"))) #change value of group
-PIT.clean$condition = as.factor(revalue(PIT.clean$condition, c(CSminus="-1", CSplus="1"))); PIT.clean$condition <- factor(PIT.clean$condition, levels = c("1", "-1"))#change value of condition
+PIT.means[fac] <- lapply(PIT.means[fac], factor)
 
-PIT.means <- aggregate(PIT.clean$AUC, by = list(PIT.clean$id, PIT.clean$condition, PIT.clean$group, PIT.clean$age, PIT.clean$gender, PIT.clean$thirsty, PIT.clean$hungry), FUN='mean') # extract means
-colnames(PIT.means) <- c('id','condition', 'group', 'age', 'gender', 'thirsty', 'hungry','AUC')
+#revalue all catego
+PIT.means$condition = as.factor(revalue(PIT.means$condition, c(CSminus="-1", CSplus="1"))); PIT.means$condition <- factor(PIT.means$condition, levels = c("1", "-1"))#change value of condition
 
 
 # clean HED ---------------------------------------------------------------
 
 # define as.factors
-fac <- c("id", "trial", "condition", "trialxcondition", "gender", "group")
-HED[fac] <- lapply(HED[fac], factor)
+HED.means[fac] <- lapply(HED.means[fac], factor)
 
 #revalue all catego
-HED$condition = as.factor(revalue(HED$condition, c(MilkShake="1", Empty="-1"))) #change value of condition
-HED$condition <- relevel(HED$condition, "1") # Make MilkShake first
-HED$group = as.factor(revalue(HED$group, c(obese="1", control="0"))) #change value of group
+HED.means$condition = as.factor(revalue(HED.means$condition, c(MilkShake="1", Empty="-1"))) #change value of condition
+HED.means$condition <- relevel(HED.means$condition, "1") # Make MilkShake first
 
-# create Intensity and Familiarity diff
-bs = ddply(HED, .(id, condition), summarise, int = mean(perceived_intensity, na.rm = TRUE), fam = mean(perceived_familiarity, na.rm = TRUE)) 
-Empty = subset(bs, condition == "-1"); Milkshake = subset(bs, condition == "1"); diff = Empty;
-diff$int = Milkshake$int - Empty$int; diff$fam = Milkshake$fam - Empty$fam;
-HED = merge(x = HED, y = diff[ , c("int", "fam", 'id')], by = "id", all.x=TRUE)
 
-#center covariates
-numer <- c("fam", "int")
-HED = HED %>% group_by %>% mutate_at(numer, scale)
-HED$intensity = HED$int; HED$familiarity = HED$fam
+# clean INST -------------------------------------------------------------
 
-HED.means <- aggregate(HED$perceived_liking, by = list(HED$id, HED$condition, HED$group, HED$age, HED$gender, HED$thirsty, HED$hungry, HED$intensity, HED$familiarity), FUN='mean') # extract means
-colnames(HED.means) <- c('id','condition','group', 'age', 'gender', 'thirsty', 'hungry', 'intensity', 'familiarity', 'perceived_liking')
+#defne factors
+fac <- c("id", "gender", "intervention")
+INST.means[fac] <- lapply(INST.means[fac], factor)
+#revalue all catego
+
+
+
 
